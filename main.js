@@ -23,10 +23,6 @@ const server = express();
 const serverHttp = http.createServer(server);
 const io = new Server(serverHttp);
 
-if (!fs.existsSync("thumbnails/")) {
-  fs.mkdirSync("thumbnails");
-}
-
 let userData = app.getPath("userData");
 console.log("userData", userData);
 
@@ -347,23 +343,6 @@ app.whenReady().then(() => {
       const buffer = Buffer.from(url.split(",")[1], "base64");
       res.setHeader("content-type", "image/png");
       res.send(buffer);
-    });
-  });
-  server.get("/thumbnail", (req, res) => {
-    const fPath = req.query.path;
-    const worker = new Worker("./thumbnailer.js", {
-      workerData: { vidPath: fPath },
-    });
-    worker.on("message", (data) => {
-      console.log(data);
-      if (data.success) {
-        res.sendFile(data.path, { root: __dirname });
-      } else {
-        res.status(500).send({ error: true, error_msg: data.error_msg });
-      }
-    });
-    worker.on("error", (msg) => {
-      res.status(500).send({ error: true, error_msg: msg });
     });
   });
   server.get("/drives", (req, res) => {
