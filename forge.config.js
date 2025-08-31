@@ -12,9 +12,7 @@ module.exports = {
     linux: {
       target: 'deb',
     },
-    "packagerConfig": {
-      "executableName": "encore-karaoke"
-    },
+    executableName: "encore-karaoke"
   },
   hooks: {
     packageAfterCopy: async (_, appResources) => {
