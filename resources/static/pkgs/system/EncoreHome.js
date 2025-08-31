@@ -919,7 +919,10 @@ const pkg = {
       bgvContainer.classOff("hidden");
       lyricsScroller.styleJs({ transform: "translateY(0)" });
 
+      const wasYouTube = state.currentSongIsYouTube;
+
       Forte.stopTrack();
+
       if (timeUpdateHandler)
         document.removeEventListener(
           "CherryTree.Forte.Playback.TimeUpdate",
@@ -935,16 +938,30 @@ const pkg = {
       lastPlaybackStatus = null;
       state.currentSongIsYouTube = false;
 
-      if (state.reservationQueue.length > 0) {
-        const nextCode = state.reservationQueue.shift();
-        updateHud();
-        const nextSong = songMap.get(nextCode);
-        if (nextSong) {
-          startPlayer(nextSong);
+      if (wasYouTube) {
+        // If it was a YouTube video, no 'stopped' event will be fired.
+        // We must manually handle the transition.
+        if (state.reservationQueue.length > 0) {
+          const nextCode = state.reservationQueue.shift();
+          updateHud();
+          const nextSong = songMap.get(nextCode);
+          if (nextSong) {
+            setTimeout(() => startPlayer(nextSong), 120);
+          }
+          return;
+        }
+      } else {
+        // For a regular track, the playbackUpdateHandler will take care of
+        // the transition if a song is queued. We just exit and let it fire.
+        if (state.reservationQueue.length > 0) {
           return;
         }
       }
 
+      // If we reach here, it means either:
+      // 1. A YouTube video was stopped and the queue was empty.
+      // 2. A regular song was stopped and the queue was empty.
+      // In both cases, the correct action is to return to the menu.
       setMode("menu");
       window.desktopIntegration.ipc.send("setRPC", {
         details: `Browsing ${songList.length} Songs...`,
