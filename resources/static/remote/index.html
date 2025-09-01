@@ -281,7 +281,7 @@
             <button class="numpad-btn" data-type="digit" data-value="0">
               0
             </button>
-            <button disabled>&nbsp;</button>
+            <button class="mic-btn">MIC</button>
             <!-- Placeholder -->
             <button class="control-btn" data-type="vol_down" data-value="-">
               Vol &darr;
@@ -322,6 +322,7 @@
         const backBtn = document.querySelector(".search-back-btn");
         const searchInput = document.querySelector(".search-input-remote");
         const searchSubmitBtn = document.querySelector(".search-submit-btn");
+        const micBtn = document.querySelector(".mic-btn");
 
         socket.on("connect", () =>
           console.log("Connected to Encore Link server."),
@@ -339,6 +340,17 @@
             socket.emit("remote-command", { type, value });
           }
         };
+
+        const micButton = async () => {
+          let micUrl = new URL("https://encore-karaoke.netlify.app/");
+          let data = await (await fetch("/mic/initiate")).json();
+          console.log(data);
+          micUrl.searchParams.set("peerId", data.playerPeerId);
+          micUrl.searchParams.set("code", data.sessionCode);
+          window.open(micUrl.href);
+        };
+
+        micBtn.addEventListener("click", micButton);
 
         // Main remote buttons (excluding YT search)
         document

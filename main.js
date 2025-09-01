@@ -11,6 +11,7 @@ const ytdl = require("@distube/ytdl-core");
 const { Server } = require("socket.io");
 const express = require("express");
 const mime = require("mime-types");
+const crypto = require("crypto");
 const qrcode = require("qrcode");
 const dgram = require("dgram");
 const path = require("path");
@@ -278,6 +279,46 @@ client.on("disconnected", () => {
 
 app.whenReady().then(() => {
   client.login();
+
+  // --- START: Added for PeerJS Mic ---
+  const playerPeerId = `encore-player-${crypto.randomBytes(8).toString("hex")}`;
+  const micSessions = new Map(); // Stores valid, one-time session codes
+
+  // This endpoint is called by the Encore Link remote to get a connection code
+  server.get("/mic/initiate", (req, res) => {
+    const sessionCode = crypto.randomUUID();
+    micSessions.set(sessionCode, { status: "pending", createdAt: Date.now() });
+
+    // Clean up old codes after 5 minutes to prevent memory leaks
+    setTimeout(() => {
+      if (micSessions.has(sessionCode)) {
+        micSessions.delete(sessionCode);
+        console.log(`[MIC] Expired unused session code: ${sessionCode}`);
+      }
+    }, 300000); // 5 minutes
+
+    console.log(
+      `[MIC] Initiated session. PeerID: ${playerPeerId}, Code: ${sessionCode}`,
+    );
+    res.json({ playerPeerId, sessionCode });
+  });
+
+  // This IPC handler is called by Forte.js to validate a code from an incoming call
+  ipcMain.handle("mic-validate-code", (event, code) => {
+    if (micSessions.has(code) && micSessions.get(code).status === "pending") {
+      micSessions.set(code, { status: "active" }); // Mark as used
+      console.log(`[MIC] Validated and activated session code: ${code}`);
+      return true;
+    }
+    console.warn(`[MIC] Rejected invalid or used session code: ${code}`);
+    return false;
+  });
+
+  // This IPC handler provides the unique PeerJS ID to the Forte.js frontend
+  ipcMain.handle("mic-get-peer-id", () => {
+    return playerPeerId;
+  });
+  // --- END: Added for PeerJS Mic ---
 
   // Add IPC handlers for config
   ipcMain.handle("getConfig", () => karaokeConfig);

@@ -5,6 +5,22 @@ import {
 } from "https://cdn.jsdelivr.net/npm/spessasynth_lib@3.27.8/+esm";
 import Html from "/libs/html.js"; // Import the Html library
 
+// --- START: Added for PeerJS Mic ---
+// Helper to dynamically load a script
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = src;
+    script.onload = resolve;
+    script.onerror = reject;
+    document.head.appendChild(script);
+  });
+}
+
+let peer = null; // PeerJS instance
+const micConnections = new Map(); // To store active mic connections and their audio nodes
+// --- END: Added for PeerJS Mic ---
+
 let socket;
 let root;
 
@@ -40,7 +56,20 @@ const state = {
     currentDeviceId: "default",
     transpose: 0,
   },
+  mic: {
+    peerId: null,
+    connectedMics: 0,
+  },
 };
+
+function createEmptyAudioTrack() {
+  const ctx = new AudioContext();
+  const oscillator = ctx.createOscillator();
+  const dst = oscillator.connect(ctx.createMediaStreamDestination());
+  oscillator.start();
+  const track = dst.stream.getAudioTracks()[0];
+  return Object.assign(track, { enabled: false });
+}
 
 function dispatchPlaybackUpdate() {
   document.dispatchEvent(
@@ -112,7 +141,9 @@ const pkg = {
     // --- End Toast UI ---
 
     try {
-      audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      audioContext = new (window.AudioContext || window.webkitAudioContext)({
+        latencyHint: "interactive",
+      });
       masterGain = audioContext.createGain();
       masterGain.connect(audioContext.destination);
       state.playback.currentDeviceId = audioContext.sinkId || "default";
@@ -140,6 +171,108 @@ const pkg = {
     } catch (e) {
       console.error("[FORTE SVC] FATAL: Web Audio API is not supported.", e);
     }
+
+    // --- START: Added for PeerJS Mic ---
+    try {
+      await loadScript("https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js");
+      console.log("[FORTE SVC] PeerJS library loaded.");
+
+      const peerId = await window.desktopIntegration.ipc.invoke(
+        "mic-get-peer-id",
+      );
+      if (!peerId) {
+        throw new Error("Could not get a Peer ID from the main process.");
+      }
+      state.mic.peerId = peerId;
+
+      peer = new Peer(peerId, {
+        config: {
+          iceServers: [
+            { urls: "stun:stun.l.google.com:19302" },
+            { urls: "stun:stun1.l.google.com:19302" },
+            { urls: "stun:stun2.l.google.com:19302" },
+          ],
+        },
+      });
+
+      peer.on("open", (id) => {
+        console.log(`[FORTE SVC] PeerJS client ready. My ID is: ${id}`);
+        document.dispatchEvent(
+          new CustomEvent("CherryTree.Forte.Mic.Ready", {
+            detail: { peerId: id },
+          }),
+        );
+      });
+
+      peer.on("call", async (call) => {
+        const sessionCode = call.metadata?.code;
+        console.log(`[FORTE SVC] Incoming mic call with code: ${sessionCode}`);
+
+        if (
+          !sessionCode ||
+          !(await window.desktopIntegration.ipc.invoke(
+            "mic-validate-code",
+            sessionCode,
+          ))
+        ) {
+          console.warn(
+            `[FORTE SVC] Rejecting incoming call with invalid code.`,
+          );
+          call.close(); // Reject the call
+          return;
+        }
+
+        console.log(`[FORTE SVC] Accepting call from Peer ID: ${call.peer}`);
+        call.answer(new MediaStream([createEmptyAudioTrack()])); // Answer the call, we don't send any stream back
+
+        call.on("stream", (remoteStream) => {
+          console.log(
+            `[FORTE SVC] Received microphone stream from ${call.peer}`,
+          );
+          const a = new Audio();
+          a.muted = true;
+          a.srcObject = remoteStream;
+          a.autoplay = true;
+
+          if (audioContext.state === "suspended") {
+            audioContext.resume();
+          }
+          const micSourceNode =
+            audioContext.createMediaStreamSource(remoteStream);
+          micSourceNode.connect(masterGain); // Connect mic audio to the main output
+
+          micConnections.set(call.peer, { call, node: micSourceNode });
+          state.mic.connectedMics = micConnections.size;
+        });
+
+        call.on("close", () => {
+          console.log(`[FORTE SVC] Microphone call from ${call.peer} closed.`);
+          const connection = micConnections.get(call.peer);
+          if (connection) {
+            connection.node.disconnect(); // Disconnect the audio node to stop playback
+            micConnections.delete(call.peer);
+            state.mic.connectedMics = micConnections.size;
+          }
+        });
+
+        call.on("error", (err) => {
+          console.error(
+            `[FORTE SVC] PeerJS call error with ${call.peer}:`,
+            err,
+          );
+        });
+      });
+
+      peer.on("error", (err) => {
+        console.error("[FORTE SVC] PeerJS main error:", err);
+      });
+    } catch (err) {
+      console.error(
+        "[FORTE SVC] FATAL: Could not initialize PeerJS for microphone.",
+        err,
+      );
+    }
+    // --- END: Added for PeerJS Mic ---
 
     socket = io("ws://localhost:8765");
     socket.on("connect", () => {
@@ -598,6 +731,17 @@ const pkg = {
     if (state.playback.synthesizer) {
       state.playback.synthesizer.close();
     }
+    // --- START: Added for PeerJS Mic ---
+    if (peer) {
+      peer.destroy();
+      console.log("[FORTE SVC] PeerJS client destroyed.");
+    }
+    micConnections.forEach((conn) => {
+      conn.node.disconnect();
+      conn.call.close();
+    });
+    micConnections.clear();
+    // --- END: Added for PeerJS Mic ---
     console.log("[FORTE SVC] Shutdown complete.");
   },
 };
