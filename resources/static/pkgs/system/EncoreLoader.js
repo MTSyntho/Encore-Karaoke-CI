@@ -14,19 +14,11 @@ const pkg = {
     let forte = root.Processes.getService("ForteSvc").data;
     let fsSvc = root.Processes.getService("FsSvc").data;
     statusP.text("Loading Forte Sound Engine...");
-    // let forteDevices = await forte.getVocalDevices();
-    // console.log("vocal devices", forteDevices);
-    // await forte.startVocalEngine({
-    //   input_device: forteDevices.inputs[0],
-    //   output_device: forteDevices.outputs[0],
-    //   buffer_size: 1024,
-    // });
 
     try {
       const config = await window.desktopIntegration.ipc.invoke("getConfig");
       console.log(config);
       if (!config.setupComplete) {
-        // await forte.loadTrack("/assets/audio/demo_futari.mp3");
         await forte.playTrack();
         await root.Libs.startPkg("system:EncoreSetup", []);
         this.end();
@@ -55,7 +47,6 @@ const pkg = {
     } catch (error) {
       // Assume config is corrupted
       console.error("Failed to load config:", error);
-      // await forte.loadTrack("/assets/audio/demo_futari.mp3");
       await forte.playTrack();
       await root.Libs.startPkg("system:EncoreSetup", []);
       this.end();
@@ -72,13 +63,13 @@ const pkg = {
 
     Pid = Root.Pid;
     Ui = Root.Processes.getService("UiLib").data;
-    Sfx = Root.Processes.getService("SfxLib").data; // Get SfxLib earlier
+    Sfx = Root.Processes.getService("SfxLib").data;
 
-    // --- Create UI Elements ---
+    // --- Create UI Elements (now transparent) ---
     wrapper = new Html("div").class("full-ui").appendTo("body").styleJs({
-      backgroundColor: "white",
+      // backgroundColor: "white", // This is no longer needed
       color: "black",
-      opacity: 0, // Start fully transparent for our master fade-in
+      opacity: 1,
     });
 
     let imgContainer = new Html("div")
@@ -102,6 +93,7 @@ const pkg = {
         width: "100%",
         height: "100%",
         objectFit: "cover",
+        opacity: 0,
       })
       .appendTo(imgContainer);
 
@@ -154,13 +146,10 @@ const pkg = {
         textAlign: "right",
         margin: "0",
         padding: "0",
-        // Hide overflow to contain the letter animations
         overflow: "hidden",
       })
       .appendTo(right);
 
-    // ** ANIMATION PREP for "ENCORE" **
-    // We split the word into spans so we can animate each letter individually.
     encoreH1.html(
       "ENCORE"
         .split("")
@@ -195,52 +184,44 @@ const pkg = {
     Ui.becomeTopUi(Pid, wrapper);
 
     // --- ANIMATION SEQUENCE ---
-    // Create a timeline to control the sequence of animations.
     const tl = anime.timeline({
-      easing: "easeInOutExpo", // A smooth, professional easing for all animations
+      easing: "easeInOutExpo",
     });
 
-    // 1. Master Fade-In for the whole screen
-    tl.add({
-      targets: wrapper.elm,
-      opacity: [0, 1],
-      duration: 500,
-    });
-
-    // 2. Mascot slides in from the left
+    // 1. Mascot slides in from the left.
     tl.add(
       {
         targets: mascotImg.elm,
-        translateX: ["-50%", 0], // Move from off-screen to its final position
+        translateX: ["-50%", 0],
         opacity: [0, 1],
         duration: 1200,
       },
-      "-=300",
-    ); // Start this animation 300ms before the previous one ends
+      0,
+    );
 
-    // 3. "ENCORE" letters fly in, staggered
+    // 2. "ENCORE" letters fly in, staggered
     tl.add(
       {
         targets: ".encore-letter",
-        translateY: ["100%", 0], // Move up from below
+        translateY: ["100%", 0],
         opacity: [0, 1],
-        delay: anime.stagger(70), // Each letter starts 70ms after the previous one
+        delay: anime.stagger(70),
       },
       "-=1000",
-    ); // Start this relative to the mascot animation
+    );
 
-    // 4. "テレビ" and "KARAOKE" fade and slide in
+    // 3. "テレビ" and "KARAOKE" fade and slide in
     tl.add(
       {
         targets: [telebiText.elm, karaokeH2.elm],
-        translateY: [-20, 0], // Move down slightly
+        translateY: [-20, 0],
         opacity: [0, 1],
         duration: 800,
       },
       "-=600",
-    ); // Start this as the "ENCORE" letters are settling
+    );
 
-    // 5. "Booting up..." text fades in last
+    // 4. "Booting up..." text fades in last
     tl.add(
       {
         targets: statusP.elm,
@@ -249,7 +230,6 @@ const pkg = {
       },
       "-=500",
     ).complete = () => {
-      // Add pulsing animation to the loading text after timeline completes
       anime({
         targets: statusP.elm,
         opacity: [1, 0.3],
@@ -259,20 +239,14 @@ const pkg = {
         easing: "easeInOutSine",
       });
 
-      // Start the loading sequence
       this.startLoadingSequence();
     };
 
     Ui.init(Pid, "horizontal", []);
   },
   end: async function () {
-    // Exit this UI when the process is exited
     Ui.cleanup(Pid);
-    // Sfx.playSfx("deck_ui_out_of_game_detail.wav");
-
-    // You can also create a nice exit animation here!
     await Ui.transition("fadeOut", wrapper, 500);
-
     Ui.giveUpUi(Pid);
     wrapper.cleanup();
   },
