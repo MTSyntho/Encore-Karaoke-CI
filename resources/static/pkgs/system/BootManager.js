@@ -43,6 +43,7 @@ const pkg = {
         padding: 0,
         color: "#333",
         display: "flex",
+        opacity: 0,
       })
       .html(
         terebiText
