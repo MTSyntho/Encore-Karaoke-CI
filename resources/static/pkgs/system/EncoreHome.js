@@ -1,6 +1,6 @@
 import Html from "/libs/html.js";
 
-let wrapper, Ui, Pid, Sfx, FsSvc, Forte;
+let wrapper, Ui, Pid, FsSvc, Forte;
 
 // We need to store event listeners so we can remove them later.
 let keydownHandler = null;
@@ -433,12 +433,27 @@ const pkg = {
   start: async function (Root) {
     Pid = Root.Pid;
     Ui = Root.Processes.getService("UiLib").data;
-    Sfx = Root.Processes.getService("SfxLib").data;
     FsSvc = Root.Processes.getService("FsSvc").data;
     Forte = Root.Processes.getService("ForteSvc").data;
 
     wrapper = new Html("div").class("full-ui").appendTo("body");
     Ui.becomeTopUi(Pid, wrapper);
+
+    // --- START: Added SFX Pre-loading ---
+    console.log("[Encore] Preloading UI sound effects...");
+    const sfxToLoad = [
+      "deck_ui_into_game_detail.wav",
+      "deck_ui_navigation.wav",
+      "deck_ui_out_of_game_detail.wav",
+    ];
+    for (let i = 0; i < 10; i++) {
+      sfxToLoad.push(`numbers/${i}.wav`);
+    }
+    await Promise.all(
+      sfxToLoad.map((sfx) => Forte.loadSfx(`/assets/audio/${sfx}`)),
+    );
+    console.log("[Encore] All UI sound effects preloaded.");
+    // --- END: Added SFX Pre-loading ---
 
     const socket = io({ query: { clientType: "app" } });
     socket.on("connect", () => console.log("[LINK] Connected to server."));
@@ -1156,7 +1171,6 @@ const pkg = {
       else if (state.highlightedIndex >= 0)
         songToPlay = songList[state.highlightedIndex];
       if (songToPlay) {
-        Sfx.playSfx("deck_ui_into_game_detail.wav");
         state.songNumber = "";
         state.highlightedIndex = -1;
         startPlayer(songToPlay);
@@ -1168,7 +1182,9 @@ const pkg = {
         state.mode === "player" ? "reservationNumber" : "songNumber";
       if (state[target].length < maxLength) {
         state[target] += digit;
-        Sfx.playSfx("deck_ui_navigation.wav");
+        if (state.mode !== "player") {
+          Forte.playSfx(`/assets/audio/numbers/${digit}.wav`);
+        }
       }
       if (state.mode === "player") updateReservationUI();
       else updateMenuUI();
@@ -1178,16 +1194,13 @@ const pkg = {
       if (state.mode === "player") {
         if (state.reservationNumber.length > 0) {
           state.reservationNumber = state.reservationNumber.slice(0, -1);
-          Sfx.playSfx("deck_ui_out_of_game_detail.wav");
           updateReservationUI();
         } else {
-          Sfx.playSfx("deck_ui_out_of_game_detail.wav");
           stopPlayer();
         }
       } else if (state.mode === "menu") {
         if (state.songNumber.length > 0) {
           state.songNumber = state.songNumber.slice(0, -1);
-          Sfx.playSfx("deck_ui_out_of_game_detail.wav");
           updateMenuUI();
         }
       } else if (
@@ -1206,11 +1219,8 @@ const pkg = {
           const code = state.reservationNumber.padStart(maxLength, "0");
           if (songMap.has(code)) {
             state.reservationQueue.push(code);
-            Sfx.playSfx("deck_ui_into_game_detail.wav");
             state.reservationNumber = "";
             updateHud();
-          } else {
-            Sfx.playSfx("deck_ui_out_of_game_detail.wav");
           }
         }
       } else if (state.mode === "yt-search") {
@@ -1222,7 +1232,6 @@ const pkg = {
               artist: video.channelTitle,
               path: `yt://${video.id}`,
             };
-            Sfx.playSfx("deck_ui_into_game_detail.wav");
             startPlayer(songToPlay);
           }
         }
@@ -1233,7 +1242,6 @@ const pkg = {
       if (state.mode === "player") {
         if (state.reservationNumber.length > 0) {
           state.reservationNumber = "";
-          Sfx.playSfx("deck_ui_out_of_game_detail.wav");
           updateReservationUI();
         } else {
           stopPlayer();
@@ -1292,7 +1300,6 @@ const pkg = {
       }
       if (newIndex !== state.highlightedIndex) {
         state.highlightedIndex = newIndex;
-        Sfx.playSfx("deck_ui_navigation.wav");
       }
       updateMenuUI();
     };
@@ -1320,7 +1327,6 @@ const pkg = {
           ),
         );
       }
-      Sfx.playSfx("deck_ui_navigation.wav");
       updateSearchHighlight();
     };
 
@@ -1482,7 +1488,6 @@ const pkg = {
     Forte.stopTrack();
     Forte.stopVocalEngine();
     Ui.cleanup(Pid);
-    Sfx.playSfx("deck_ui_out_of_game_detail.wav");
     Ui.giveUpUi(Pid);
     wrapper.cleanup();
   },

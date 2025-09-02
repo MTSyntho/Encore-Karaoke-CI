@@ -35,6 +35,12 @@ let masterGain;
 let sourceNode = null;
 let animationFrameId = null;
 
+// --- START: Added for Sound Effects ---
+let sfxAudioContext;
+let sfxGain;
+const sfxCache = new Map();
+// --- END: Added for Sound Effects ---
+
 // --- Combined Service State ---
 const state = {
   vocalEngine: {
@@ -171,6 +177,22 @@ const pkg = {
     } catch (e) {
       console.error("[FORTE SVC] FATAL: Web Audio API is not supported.", e);
     }
+
+    // --- START: Added for Sound Effects ---
+    try {
+      sfxAudioContext = new (window.AudioContext ||
+        window.webkitAudioContext)();
+      sfxGain = sfxAudioContext.createGain();
+      sfxGain.connect(sfxAudioContext.destination);
+      sfxGain.gain.value = 1; // Default volume for SFX
+      console.log("[FORTE SVC] SFX Audio context initialized.");
+    } catch (e) {
+      console.error(
+        "[FORTE SVC] FATAL: Could not create SFX Audio context.",
+        e,
+      );
+    }
+    // --- END: Added for Sound Effects ---
 
     // --- START: Added for PeerJS Mic ---
     try {
@@ -318,6 +340,49 @@ const pkg = {
   },
 
   data: {
+    // --- START: Added for Sound Effects ---
+    loadSfx: async (url) => {
+      if (!sfxAudioContext) return false;
+      if (sfxCache.has(url)) return true; // Already loaded
+
+      try {
+        const response = await fetch(url);
+        const arrayBuffer = await response.arrayBuffer();
+        const audioBuffer = await sfxAudioContext.decodeAudioData(arrayBuffer);
+        sfxCache.set(url, audioBuffer);
+        return true;
+      } catch (e) {
+        console.error(`[FORTE SVC] Failed to load SFX: ${url}`, e);
+        return false;
+      }
+    },
+
+    playSfx: async (url) => {
+      if (!sfxAudioContext) return;
+
+      if (sfxAudioContext.state === "suspended") {
+        await sfxAudioContext.resume();
+      }
+
+      let audioBuffer = sfxCache.get(url);
+      if (!audioBuffer) {
+        console.warn(
+          `[FORTE SVC] SFX not preloaded, loading on demand: ${url}`,
+        );
+        const success = await pkg.data.loadSfx(url);
+        if (!success) return;
+        audioBuffer = sfxCache.get(url);
+      }
+
+      if (audioBuffer) {
+        const source = sfxAudioContext.createBufferSource();
+        source.buffer = audioBuffer;
+        source.connect(sfxGain);
+        source.start(0);
+      }
+    },
+    // --- END: Added for Sound Effects ---
+
     getPlaybackDevices: async () => {
       if (!navigator.mediaDevices?.enumerateDevices) {
         console.warn("[FORTE SVC] enumerateDevices not supported.");
@@ -724,6 +789,12 @@ const pkg = {
     if (audioContext && audioContext.state !== "closed") {
       audioContext.close();
     }
+    // --- START: Added for Sound Effects ---
+    if (sfxAudioContext && sfxAudioContext.state !== "closed") {
+      sfxAudioContext.close();
+    }
+    sfxCache.clear();
+    // --- END: Added for Sound Effects ---
     if (animationFrameId) {
       cancelAnimationFrame(animationFrameId);
       animationFrameId = null;
