@@ -568,30 +568,31 @@ const pkg = {
         .search-title { font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .search-channel { font-size: 0.9rem; opacity: 0.7; }
 
-        .player-ui { position: absolute; inset: 0; padding: 2rem; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; transition: opacity 0.3s ease-out; background: linear-gradient(to top, rgba(0,0,0,0.9) 0%, transparent 50%); z-index: 15; }
-        .lyrics-container, .midi-lyrics-container { width: 100%; max-width: 1200px; height: 350px; position: relative; transition: opacity 0.3s ease; }
-        .lyrics-container { overflow: hidden; }
+        .player-ui { position: absolute; inset: 0; padding: 2rem; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; transition: opacity 0.3s ease-out; background: linear-gradient(to top, rgba(0,0,0,0.9) 0%, transparent 50%); z-index: 15; padding-bottom: 5vh; }
+        .player-bottom-section { width: 100%; max-width: 1200px; display: flex; flex-direction: column; align-items: center; gap: 1rem; }
+        .countdown-display { width: 9rem; height: 9rem; display: flex; align-items: center; justify-content: center; border-radius: 50%; background: radial-gradient(circle at 50% 120%, #f7b733, #fc4a1a); font-family: 'Rajdhani', sans-serif; font-weight: 900; font-size: 6rem; color: #000; text-shadow: 2px 2px 4px rgba(0,0,0,0.3); box-shadow: inset 0 0 10px rgba(0,0,0,0.5), 0 5px 15px rgba(0,0,0,0.4); border: 4px solid #4d4d4d; opacity: 0; transform: scale(0.8); transition: opacity 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275), transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); pointer-events: none; line-height: 1; }
+        .countdown-display.visible { opacity: 1; transform: scale(1); }
+        .lyrics-container, .midi-lyrics-container { width: 100%; height: auto; position: relative; transition: opacity 0.3s ease; }
+        .lyrics-container { display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 1rem; }
         .midi-lyrics-container { display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 1rem; }
-        .lyrics-scroller { position: relative; width: 100%; transition: transform 0.4s ease-in-out; }
-        .lyric-line { margin: 0; text-align: center; font-size: 3rem; font-weight: bold; text-shadow: 2px 2px 6px #000; transition: all 0.3s ease; }
-        .lyric-line.lrc { margin-bottom: 1rem; color: rgba(255, 255, 255, 0.4); }
-        .lyric-line.past { opacity: 0.5; font-size: 2.7rem; }
-        .lyric-line.active { color: #89CFF0; fontSize: 3.3rem; }
+        .lyric-line { margin: 0; text-align: center; font-size: 4.5rem; font-weight: bold; text-shadow: 2px 2px 6px #000; transition: color 0.3s ease, opacity 0.3s ease; color: rgba(255, 255, 255, 0.4); -webkit-text-stroke: 0; text-stroke: 0; }
+        .lyric-line.past { opacity: 0.5; }
+        .lyric-line.active { color: #FFFFFF; text-shadow: none; -webkit-text-stroke: 6px #010141; text-stroke: 6px #010141; paint-order: stroke fill; }
         .lyric-line-original { line-height: 1.2; }
         .lyric-line-romanized { font-size: 1.5rem; color: rgba(255, 255, 255, 0.5); line-height: 1.1; font-weight: 500; letter-spacing: 0.05em; }
-        .lyric-line.active .lyric-line-romanized { color: #89CFF0; }
+        .lyric-line.active .lyric-line-romanized { color: #FFFFFF; }
         
         .midi-lyric-line { display: flex; justify-content: center; flex-wrap: nowrap; white-space: pre; color: rgba(255, 255, 255, 0.4); }
         .midi-lyric-line.next { opacity: 0.5; }
         .lyric-syllable-container { display: inline-flex; flex-direction: column; align-items: center; margin: 0; }
         .lyric-syllable-original, .lyric-syllable-romanized { position: relative; color: rgba(255, 255, 255, 0.4); }
-        .lyric-syllable-original::after, .lyric-syllable-romanized::after { content: attr(data-text); position: absolute; top: 0; left: 0; width: 0; color: #89CFF0; overflow: hidden; transition: width 0.1s linear; }
+        .lyric-syllable-original::after, .lyric-syllable-romanized::after { content: attr(data-text); position: absolute; top: 0; left: 0; width: 0; color: #FFFFFF; text-shadow: none; -webkit-text-stroke: 5px #010141; text-stroke: 5px #010141; paint-order: stroke fill; overflow: hidden; transition: width 0.1s linear; }
         .lyric-syllable-container.active .lyric-syllable-original::after,
         .lyric-syllable-container.active .lyric-syllable-romanized::after { width: 100%; }
         .lyric-syllable-original { font-size: inherit; }
         .lyric-syllable-romanized { font-size: 1rem; margin-top: 0.25rem; line-height: 1; font-weight: 500; }
         
-        .player-progress { width: 100%; max-width: 1200px; height: 10px; background: rgba(255,255,255,0.2); border-radius: 5px; margin-top: 2rem; }
+        .player-progress { width: 100%; max-width: 1200px; height: 10px; background: rgba(255,255,255,0.2); border-radius: 5px; margin-top: 1rem; }
         .progress-bar { width: 0%; height: 100%; background-color: #89CFF0; border-radius: 5px; transition: width 0.1s linear; }
         
         /* --- Intro Card --- */
@@ -709,15 +710,33 @@ const pkg = {
       .class("search-results-container")
       .appendTo(searchWindow);
 
+    // --- Player UI Structure with Countdown ---
+    const introCard = new Html("div").class("intro-card").appendTo(playerUi);
+    const introCardTitle = new Html("div")
+      .class("intro-card-title")
+      .appendTo(introCard);
+    const introCardArtist = new Html("div")
+      .class("intro-card-artist")
+      .appendTo(introCard);
+
+    const bottomSection = new Html("div")
+      .class("player-bottom-section")
+      .appendTo(playerUi);
+    const countdownDisplay = new Html("div")
+      .class("countdown-display")
+      .appendTo(bottomSection);
     const lrcLyricsContainer = new Html("div")
       .class("lyrics-container")
-      .appendTo(playerUi);
-    const lyricsScroller = new Html("div")
-      .class("lyrics-scroller")
+      .appendTo(bottomSection);
+    const lrcLineDisplay1 = new Html("div")
+      .class("lyric-line")
+      .appendTo(lrcLyricsContainer);
+    const lrcLineDisplay2 = new Html("div")
+      .class("lyric-line", "next")
       .appendTo(lrcLyricsContainer);
     const midiLyricsContainer = new Html("div")
       .class("midi-lyrics-container")
-      .appendTo(playerUi);
+      .appendTo(bottomSection);
     const midiLineDisplay1 = new Html("div")
       .class("lyric-line", "midi-lyric-line")
       .appendTo(midiLyricsContainer);
@@ -726,17 +745,14 @@ const pkg = {
       .appendTo(midiLyricsContainer);
     const playerProgress = new Html("div")
       .class("player-progress")
-      .appendTo(playerUi);
+      .appendTo(bottomSection);
     const progressBar = new Html("div")
       .class("progress-bar")
       .appendTo(playerProgress);
-    const introCard = new Html("div").class("intro-card").appendTo(playerUi);
-    const introCardTitle = new Html("div")
-      .class("intro-card-title")
-      .appendTo(introCard);
-    const introCardArtist = new Html("div")
-      .class("intro-card-artist")
-      .appendTo(introCard);
+
+    // --- Countdown and Lyric State Variables (scoped to start function) ---
+    let countdownTimers = [];
+    let nextLineUpdateTimeout = null;
 
     // --- SCORE ANIMATION HELPERS ---
     function animateNumber(element, target, duration, isFloat = true) {
@@ -993,6 +1009,13 @@ const pkg = {
     const startPlayer = async (song) => {
       await Romanizer.init();
 
+      // Clear all timers from previous song
+      if (nextLineUpdateTimeout) clearTimeout(nextLineUpdateTimeout);
+      countdownTimers.forEach(clearTimeout);
+      nextLineUpdateTimeout = null;
+      countdownTimers = [];
+      countdownDisplay.classOff("visible").text("");
+
       if (timeUpdateHandler)
         document.removeEventListener(
           "CherryTree.Forte.Playback.TimeUpdate",
@@ -1012,7 +1035,8 @@ const pkg = {
       lyricEventHandler = null;
       scoreUpdateHandler = null;
 
-      lyricsScroller.clear();
+      lrcLineDisplay1.clear();
+      lrcLineDisplay2.clear();
       midiLineDisplay1.clear();
       midiLineDisplay2.clear();
       ScoreHUD.hide();
@@ -1076,8 +1100,48 @@ const pkg = {
         introCard.classOn("visible");
 
         let lrcParsedLyrics = [],
-          lrcLyricLines = [],
           currentLrcIndex = -1;
+
+        const scheduleCountdown = (targetTime, currentTime) => {
+          countdownTimers.forEach(clearTimeout);
+          countdownTimers = [];
+
+          const delays = {
+            show3: (targetTime - 3 - currentTime) * 1000,
+            show2: (targetTime - 2 - currentTime) * 1000,
+            show1: (targetTime - 1 - currentTime) * 1000,
+            hide: (targetTime - currentTime) * 1000,
+          };
+
+          if (delays.show3 > 0) {
+            countdownTimers.push(
+              setTimeout(() => {
+                countdownDisplay.text("3").classOn("visible");
+              }, delays.show3),
+            );
+          }
+          if (delays.show2 > 0) {
+            countdownTimers.push(
+              setTimeout(() => {
+                countdownDisplay.text("2");
+              }, delays.show2),
+            );
+          }
+          if (delays.show1 > 0) {
+            countdownTimers.push(
+              setTimeout(() => {
+                countdownDisplay.text("1");
+              }, delays.show1),
+            );
+          }
+          if (delays.hide > 0) {
+            countdownTimers.push(
+              setTimeout(() => {
+                countdownDisplay.classOff("visible").text("");
+              }, delays.hide),
+            );
+          }
+        };
 
         if (playbackState.isMidi) {
           midiLyricsContainer.styleJs({ display: "flex" });
@@ -1171,7 +1235,7 @@ const pkg = {
           );
         } else if (song.lrcPath) {
           midiLyricsContainer.styleJs({ display: "none" });
-          lrcLyricsContainer.styleJs({ display: "block" });
+          lrcLyricsContainer.styleJs({ display: "flex" });
           const lrcText = await FsSvc.readFile(song.lrcPath);
           const timeRegex = /\[(\d{2}):(\d{2})\.(\d{2,3})\]/;
           if (lrcText) {
@@ -1212,40 +1276,39 @@ const pkg = {
           midiLyricsContainer.styleJs({ opacity: "1" });
 
           if (lrcParsedLyrics.length > 0) {
-            lyricsScroller.clear();
-            const topPadding = lrcLyricsContainer.elm.clientHeight / 2;
-            lyricsScroller.styleJs({
-              paddingTop: `${topPadding}px`,
-              paddingBottom: `${topPadding}px`,
-            });
-            lrcParsedLyrics.forEach((line) => {
-              const p = new Html("p")
-                .class("lyric-line", "lrc")
-                .appendTo(lyricsScroller);
+            const lrcDisplayLines = [lrcLineDisplay1, lrcLineDisplay2];
+            const renderLrcLine = (displayEl, lineData) => {
+              displayEl.clear();
+              if (!lineData) return;
               new Html("div")
                 .class("lyric-line-original")
-                .text(line.text)
-                .appendTo(p);
-              if (line.romanized) {
+                .text(lineData.text)
+                .appendTo(displayEl);
+              if (lineData.romanized) {
                 new Html("div")
                   .class("lyric-line-romanized")
-                  .text(line.romanized)
-                  .appendTo(p);
+                  .text(lineData.romanized)
+                  .appendTo(displayEl);
               }
-              lrcLyricLines.push(p);
-            });
+            };
+            lrcDisplayLines.forEach((line) =>
+              line.clear().classOff("active", "next"),
+            );
+            renderLrcLine(lrcDisplayLines[0], lrcParsedLyrics[0]);
+            renderLrcLine(lrcDisplayLines[1], lrcParsedLyrics[1]);
+            lrcDisplayLines[1].classOn("next");
+
+            // Check for intro countdown
+            if (lrcParsedLyrics[0].time > 8.0) {
+              scheduleCountdown(lrcParsedLyrics[0].time, 0);
+            }
           }
           Forte.playTrack();
         }, PRE_ROLL_DELAY_MS);
         timeUpdateHandler = (e) => {
           const { currentTime, duration } = e.detail;
           progressBar.styleJs({ width: `${(currentTime / duration) * 100}%` });
-          if (
-            lrcParsedLyrics.length === 0 ||
-            lrcLyricLines.length === 0 ||
-            playbackState.isMidi
-          )
-            return;
+          if (lrcParsedLyrics.length === 0 || playbackState.isMidi) return;
           let newIndex = -1;
           for (let i = lrcParsedLyrics.length - 1; i >= 0; i--)
             if (currentTime >= lrcParsedLyrics[i].time) {
@@ -1253,24 +1316,50 @@ const pkg = {
               break;
             }
           if (newIndex !== currentLrcIndex) {
+            if (nextLineUpdateTimeout) clearTimeout(nextLineUpdateTimeout);
+
             currentLrcIndex = newIndex;
-            lrcLyricLines.forEach((line, i) => {
-              line.classOff("active", "past");
-              if (i < newIndex) line.classOn("past");
-              else if (i === newIndex) line.classOn("active");
-            });
-            if (newIndex > -1) {
-              const activeEl = lrcLyricLines[newIndex].elm;
-              const scrollerTopPadding =
-                lrcLyricsContainer.elm.clientHeight / 2;
-              const scrollOffset =
-                scrollerTopPadding -
-                activeEl.offsetTop -
-                activeEl.clientHeight / 2;
-              lyricsScroller.styleJs({
-                transform: `translateY(${scrollOffset}px)`,
-              });
+            if (newIndex < 0) return;
+
+            const lrcDisplayLines = [lrcLineDisplay1, lrcLineDisplay2];
+            const renderLrcLine = (displayEl, lineData) => {
+              displayEl.clear();
+              if (!lineData) return;
+              new Html("div")
+                .class("lyric-line-original")
+                .text(lineData.text)
+                .appendTo(displayEl);
+              if (lineData.romanized) {
+                new Html("div")
+                  .class("lyric-line-romanized")
+                  .text(lineData.romanized)
+                  .appendTo(displayEl);
+              }
+            };
+
+            const activeDisplay = lrcDisplayLines[currentLrcIndex % 2];
+            const nextDisplay = lrcDisplayLines[(currentLrcIndex + 1) % 2];
+
+            activeDisplay.classOn("active").classOff("next");
+            nextDisplay.classOff("active").classOn("next");
+
+            const currentLine = lrcParsedLyrics[currentLrcIndex];
+            const nextLine = lrcParsedLyrics[currentLrcIndex + 1];
+
+            let lineDurationMs = 5000;
+            if (nextLine) {
+              lineDurationMs = (nextLine.time - currentLine.time) * 1000;
+              // Check for interlude countdown
+              if (lineDurationMs / 1000 > 8.0) {
+                scheduleCountdown(nextLine.time, currentTime);
+              }
             }
+
+            const delay = lineDurationMs / 2;
+
+            nextLineUpdateTimeout = setTimeout(() => {
+              renderLrcLine(nextDisplay, nextLine);
+            }, delay);
           }
         };
         document.addEventListener(
@@ -1285,9 +1374,15 @@ const pkg = {
       youtubePlayerContainer.classOn("hidden");
       youtubeIframe.attr({ src: "" });
       bgvContainer.classOff("hidden");
-      lyricsScroller.styleJs({ transform: "translateY(0)" });
 
       Forte.stopTrack();
+
+      // Clear all timers
+      if (nextLineUpdateTimeout) clearTimeout(nextLineUpdateTimeout);
+      countdownTimers.forEach(clearTimeout);
+      nextLineUpdateTimeout = null;
+      countdownTimers = [];
+      countdownDisplay.classOff("visible").text("");
 
       if (timeUpdateHandler)
         document.removeEventListener(
