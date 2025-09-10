@@ -9,15 +9,9 @@ let playbackUpdateHandler = null;
 let lyricEventHandler = null; // Listener for our custom lyric events
 let scoreUpdateHandler = null; // Listener for real-time score updates
 let lastPlaybackStatus = null;
-let tokenizer = null;
-
-kuromoji.builder({ dicPath: "/libs/dict/" }).build(function (err, t) {
-  if (err) {
-    console.log(err);
-  }
-  console.log(t);
-  tokenizer = t;
-});
+// --- REMOVED: Kuromoji tokenizer and its loader ---
+// let tokenizer = null;
+// kuromoji.builder(...);
 
 const config = await window.desktopIntegration.ipc.invoke("getConfig");
 
@@ -34,6 +28,8 @@ const BGVPlayer = {
   selectedCategory: "Auto", // Default to Auto mode
   osdTimeout: null,
   osdVisible: false,
+  isManualMode: false, // Flag for when an MV is playing
+  activeManualPlayer: null, // Holds the video element playing an MV
 
   async init(container) {
     this.bgvContainer = container;
@@ -65,7 +61,6 @@ const BGVPlayer = {
       this.videoElements.push(elm);
     }
 
-    // Create BGV OSD - moved outside of bgvContainer
     const osd = new Html("div")
       .styleJs({
         position: "absolute",
@@ -81,7 +76,7 @@ const BGVPlayer = {
         pointerEvents: "none",
         zIndex: 100000,
       })
-      .appendTo(wrapper); // Changed from this.bgvContainer to wrapper
+      .appendTo(wrapper);
 
     this.osdBox = new Html("div")
       .styleJs({
@@ -90,7 +85,7 @@ const BGVPlayer = {
         borderRadius: "0.5rem",
         padding: "0.6rem 1.2rem",
         minWidth: "240px",
-        zIndex: 2147483647, // Maximum possible z-index
+        zIndex: 2147483647,
       })
       .appendTo(osd);
 
@@ -144,6 +139,7 @@ const BGVPlayer = {
   },
 
   async updatePlaylistForCategory() {
+    if (this.isManualMode) return;
     const baseUrl = "http://127.0.0.1:9864/assets/video/bgv/";
     this.playlist = [];
 
@@ -194,6 +190,7 @@ const BGVPlayer = {
   },
 
   cycleCategory(direction) {
+    if (this.isManualMode) return;
     const allCategories = [
       "Auto",
       ...this.categories.map((c) => c.BGV_CATEGORY),
@@ -208,7 +205,7 @@ const BGVPlayer = {
   },
 
   start() {
-    if (this.playlist.length === 0) return;
+    if (this.isManualMode || this.playlist.length === 0) return;
     const activePlayer = this.videoElements[this.activePlayerIndex];
     const preloadPlayer = this.videoElements[1 - this.activePlayerIndex];
     activePlayer.loop = false;
@@ -224,6 +221,7 @@ const BGVPlayer = {
   },
 
   playNext() {
+    if (this.isManualMode) return;
     const currentPlayer = this.videoElements[this.activePlayerIndex];
     const nextPlayer = this.videoElements[1 - this.activePlayerIndex];
     nextPlayer.play().catch(console.error);
@@ -240,40 +238,63 @@ const BGVPlayer = {
     }, this.FADE_DURATION + this.PRELOAD_DELAY);
   },
 
+  async playSingleVideo(url) {
+    this.isManualMode = true;
+    await this.cleanStop();
+    const activePlayer = this.videoElements[this.activePlayerIndex];
+    activePlayer.src = url;
+    activePlayer.load();
+    activePlayer.style.opacity = "1";
+    this.activeManualPlayer = activePlayer;
+    return activePlayer;
+  },
+
+  async resumePlaylist() {
+    if (!this.isManualMode) return;
+    this.isManualMode = false;
+    this.activeManualPlayer = null;
+    await this.cleanStop();
+    this.start();
+  },
+
   stop() {
     this.cleanStop().catch(console.error);
   },
 };
 
-// --- Romanizer Module ---
+// --- Romanizer Module (UPDATED) ---
 const Romanizer = {
-  isReady: false,
-
-  async init() {
-    if (this.isReady) return;
-    this.isReady = true;
-    console.log("[Romanizer] Ready.");
-  },
   getPlaceholder(text, placeholderChar) {
     return text.replace(/\S/g, placeholderChar);
   },
-  romanize(text) {
-    if (!text || !this.isReady || !text.trim()) return null;
+  async romanize(text) {
+    if (!text || !text.trim()) return null;
+
+    // Japanese check: Use server endpoint
     if (/[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/.test(text)) {
-      if (tokenizer) {
-        let tokenized = tokenizer.tokenize(text);
-        let tokenizedText = "";
-        tokenized.forEach((token) => {
-          if (token.word_type == "KNOWN") {
-            tokenizedText = tokenizedText + token.pronunciation;
-          }
-        });
-        return wanakana.toRomaji(tokenizedText);
+      try {
+        const params = new URLSearchParams({ t: text });
+        const url = `http://127.0.0.1:9864/romanize?${params.toString()}`;
+        const res = await fetch(url);
+        if (!res.ok) {
+          console.error(
+            `[Romanizer] Failed to fetch romanization for: ${text}`,
+          );
+          return null;
+        }
+        const data = await res.text();
+        return data;
+      } catch (err) {
+        console.error(`[Romanizer] Network error during romanization:`, err);
+        return null;
       }
     }
+
+    // Korean check (unchanged)
     if (/[\uac00-\ud7af]/.test(text)) {
       return Aromanize.romanize(text);
     }
+
     return null;
   },
 };
@@ -297,29 +318,24 @@ const InfoBar = {
     this.showDefault(); // Set initial state
   },
 
-  // Shows a message.
-  // - If options.duration is set, it's temporary and reverts to default after ms.
-  // - Otherwise, it's persistent until cleared or overwritten.
   show(label, content, options = {}) {
     if (this.timeout) clearTimeout(this.timeout);
 
     this.isPersistent = !options.duration;
 
     this.labelEl.text(label);
-    this.contentEl.html(content); // Use .html() to allow formatted content
+    this.contentEl.html(content);
 
     if (options.duration) {
       this.timeout = setTimeout(() => {
         this.timeout = null;
         if (!this.isPersistent) {
-          // Check again in case a persistent msg was shown
           this.showDefault();
         }
       }, options.duration);
     }
   },
 
-  // Shows the default state (Up Next song)
   showDefault() {
     this.isPersistent = false;
     const { reservationQueue, songMap } = this.context();
@@ -330,7 +346,7 @@ const InfoBar = {
         reservationQueue.length > 1 ? ` (+${reservationQueue.length - 1})` : "";
 
       if (nextSong) {
-        const content = `<span class="info-bar-code">${nextSong.code}</span>
+        const content = `<span class.info-bar-code">${nextSong.code}</span>
                          <span class="info-bar-title">${nextSong.title}</span>
                          <span class="info-bar-artist">- ${nextSong.artist}${extra}</span>`;
         this.show("UP NEXT", content);
@@ -340,10 +356,9 @@ const InfoBar = {
     } else {
       this.show("UP NEXT", "—");
     }
-    this.isPersistent = false; // showDefault should never be persistent
+    this.isPersistent = false;
   },
 
-  // Special handler for showing reservation input
   showReservation(reservationNumber) {
     const { songMap } = this.context();
     const displayCode = reservationNumber.padStart(this.maxLength, "0");
@@ -361,10 +376,7 @@ const InfoBar = {
     this.show("RESERVING", content);
   },
 
-  // Called from outside to give the module context to the current state
-  // This avoids passing state into every single call.
   context() {
-    // This is a placeholder that will be replaced in pkg.start
     return { reservationQueue: [], songMap: new Map() };
   },
 };
@@ -406,7 +418,6 @@ const pkg = {
     wrapper = new Html("div").class("full-ui").appendTo("body");
     Ui.becomeTopUi(Pid, wrapper);
 
-    // --- START: Added SFX Pre-loading ---
     console.log("[Encore] Preloading UI sound effects...");
     const sfxToLoad = ["score_tally.wav"];
     for (let i = 0; i < 10; i++) {
@@ -416,7 +427,6 @@ const pkg = {
       sfxToLoad.map((sfx) => Forte.loadSfx(`/assets/audio/${sfx}`)),
     );
     console.log("[Encore] All UI sound effects preloaded.");
-    // --- END: Added SFX Pre-loading ---
 
     const socket = io({ query: { clientType: "app" } });
     socket.on("connect", () => console.log("[LINK] Connected to server."));
@@ -432,15 +442,16 @@ const pkg = {
       reservationNumber: "",
       reservationQueue: [],
       volume: config.audioConfig.mix.instrumental.volume,
+      videoSyncOffset: config.videoConfig?.syncOffset || 0,
       searchResults: [],
       highlightedSearchIndex: -1,
       isSearching: false,
       currentSongIsYouTube: false,
-      currentSongIsMultiplexed: false, // Track if the current song can be scored
-      isTransitioning: false, // FIX: Add the transition lock flag
+      currentSongIsMultiplexed: false,
+      currentSongIsMV: false,
+      isTransitioning: false,
     };
 
-    // Give InfoBar access to the current state and songMap
     InfoBar.context = () => ({
       reservationQueue: state.reservationQueue,
       songMap: songMap,
@@ -469,7 +480,6 @@ const pkg = {
       .class("player-ui", "hidden")
       .appendTo(wrapper);
 
-    // --- DETAILED SCORE SCREEN ELEMENT CREATION ---
     const postSongScoreScreen = new Html("div")
       .class("post-song-score-screen")
       .appendTo(wrapper);
@@ -522,7 +532,6 @@ const pkg = {
     const upbandGauge = createGauge("Upband", "gauge-upband");
     const downbandGauge = createGauge("Downband", "gauge-downband");
 
-    // Initialize the new UI Modules
     InfoBar.init(wrapper, maxLength);
     ScoreHUD.init(wrapper);
 
@@ -533,12 +542,10 @@ const pkg = {
         .bgv-container { position: absolute; inset: 0; background-color: #000; overflow: hidden; z-index: 1; }
         .youtube-player-container { position: absolute; inset: 0; z-index: 2; background: #000; }
         .youtube-player-container iframe { width: 100%; height: 100%; border: none; }
-
         .qr-code-container { position: absolute; bottom: 2rem; left: 2rem; z-index: 11; display: flex; align-items: center; gap: 0.5rem; background: rgba(0,0,0,0.5); padding: 0.5rem; border-radius: 0.25rem; }
         .qr-code-container img { width: 50px; height: 50px; }
         .qr-code-container p { margin: 0; font-family: 'Rajdhani', sans-serif; font-size: 0.9rem; color: rgba(255,255,255,0.7); }
         .mode-player .qr-code-container, .mode-yt-search .qr-code-container { display: none; }
-
         .overlay-ui { display: flex; align-items: stretch; gap: 3rem; position: relative; width: 100%; height: 100%; padding: 2rem 3rem; background: linear-gradient(180deg, rgba(0,0,0,0.7) 0%, rgba(0,0,0,0.3) 20%, transparent 50%, rgba(0,0,0,0.9) 100%); transition: opacity 0.3s ease-out; z-index: 10; }
         .hidden { opacity: 0; pointer-events: none; }
         .left-panel { flex: 2; display: flex; flex-direction: column; align-items: center; justify-content: center; transition: opacity 0.3s ease-out; }
@@ -553,7 +560,6 @@ const pkg = {
         .song-list-container { flex-grow: 1; overflow-y: auto; }
         .song-item { display: flex; padding: 0.5rem; border-bottom: 1px solid rgba(255,255,255,0.1); transition: background-color 0.2s; } .song-item.highlighted { background-color: #89CFF044; }
         .song-item-code { font-family: 'Rajdhani', sans-serif; font-weight: 700; width: 80px; color: #89CFF0; } .song-item-title { flex-grow: 1; } .song-item-artist { width: 30%; text-align: right; opacity: 0.7; }
-        
         .search-ui { position: absolute; inset: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(10px); display: flex; align-items: center; justify-content: center; transition: opacity 0.3s ease-out; z-index: 20; }
         .search-window { width: 90%; max-width: 1200px; height: 80vh; background: rgba(10,10,20,0.8); border: 1px solid rgba(255,255,255,0.2); border-radius: 0.5rem; padding: 1.5rem; display: flex; flex-direction: column; gap: 1.5rem; }
         .search-input { font-family: 'Rajdhani', sans-serif; font-size: 2rem; background: rgba(0,0,0,0.4); border: 2px solid rgba(255,255,255,0.3); border-radius: 0.5rem; color: white; padding: 0.8rem 1.2rem; width: 100%; text-align: center; outline: none; transition: all 0.2s ease; flex-shrink: 0; }
@@ -567,7 +573,6 @@ const pkg = {
         .search-info { display: flex; flex-direction: column; overflow: hidden; }
         .search-title { font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .search-channel { font-size: 0.9rem; opacity: 0.7; }
-
         .player-ui { position: absolute; inset: 0; padding: 2rem; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; transition: opacity 0.3s ease-out; background: linear-gradient(to top, rgba(0,0,0,0.9) 0%, transparent 50%); z-index: 15; padding-bottom: 5vh; }
         .player-bottom-section { width: 100%; max-width: 1200px; display: flex; flex-direction: column; align-items: center; gap: 1rem; }
         .countdown-display { width: 9rem; height: 9rem; display: flex; align-items: center; justify-content: center; border-radius: 50%; background: radial-gradient(circle at 50% 120%, #f7b733, #fc4a1a); font-family: 'Rajdhani', sans-serif; font-weight: 900; font-size: 6rem; color: #000; text-shadow: 2px 2px 4px rgba(0,0,0,0.3); box-shadow: inset 0 0 10px rgba(0,0,0,0.5), 0 5px 15px rgba(0,0,0,0.4); border: 4px solid #4d4d4d; opacity: 0; transform: scale(0.8); transition: opacity 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275), transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); pointer-events: none; line-height: 1; }
@@ -581,7 +586,6 @@ const pkg = {
         .lyric-line-original { line-height: 1.2; }
         .lyric-line-romanized { font-size: 1.5rem; color: rgba(255, 255, 255, 0.5); line-height: 1.1; font-weight: 500; letter-spacing: 0.05em; }
         .lyric-line.active .lyric-line-romanized { color: #FFFFFF; }
-        
         .midi-lyric-line { display: flex; justify-content: center; flex-wrap: nowrap; white-space: pre; color: rgba(255, 255, 255, 0.4); }
         .midi-lyric-line.next { opacity: 0.5; }
         .lyric-syllable-container { display: inline-flex; flex-direction: column; align-items: center; margin: 0; }
@@ -591,11 +595,8 @@ const pkg = {
         .lyric-syllable-container.active .lyric-syllable-romanized::after { width: 100%; }
         .lyric-syllable-original { font-size: inherit; }
         .lyric-syllable-romanized { font-size: 1rem; margin-top: 0.25rem; line-height: 1; font-weight: 500; }
-        
         .player-progress { width: 100%; max-width: 1200px; height: 10px; background: rgba(255,255,255,0.2); border-radius: 5px; margin-top: 1rem; }
         .progress-bar { width: 0%; height: 100%; background-color: #89CFF0; border-radius: 5px; transition: width 0.1s linear; }
-        
-        /* --- Intro Card --- */
         .intro-card { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%) scale(0.95); width: 80%; max-width: 900px; padding: 2rem 3rem; background: linear-gradient(105deg, rgba(15, 23, 42, 0.95) 0%, rgba(30, 27, 75, 0.95) 100%); border: 1px solid rgba(137, 207, 240, 0.4); border-radius: 1.5rem; box-shadow: 0 10px 30px rgba(0,0,0,0.5); text-align: left; font-family: 'Rajdhani', sans-serif; color: white; z-index: 16; opacity: 0; transition: opacity 0.4s ease-out, transform 0.4s ease-out; pointer-events: none; display: flex; flex-direction: column; gap: 0.5rem; }
         .intro-card.visible { opacity: 1; transform: translate(-50%, -50%) scale(1); }
         .intro-card-title, .intro-card-artist { opacity: 0; transform: translateY(20px); transition: opacity 0.4s ease-out, transform 0.4s ease-out; }
@@ -603,8 +604,6 @@ const pkg = {
         .intro-card.visible .intro-card-artist { opacity: 1; transform: translateY(0); transition-delay: 0.3s; }
         .intro-card-title { font-size: 4rem; font-weight: 700; letter-spacing: 0.05em; line-height: 1.1; text-shadow: 2px 2px 8px rgba(0,0,0,0.5); }
         .intro-card-artist { font-size: 1.5rem; font-weight: 500; opacity: 0.8; border-top: 1px solid rgba(255,255,255,0.3); padding-top: 0.75rem; margin-top: 0.5rem; }
-
-        /* --- Info Bar & Score HUD Styles --- */
         .info-bar { position: absolute; top: 2rem; left: 3rem; right: 3rem; height: 50px; display: flex; align-items: stretch; background: rgba(0,0,0,0.7); border: 1px solid rgba(255,255,255,0.2); border-radius: 0.5rem; font-family: 'Rajdhani', sans-serif; color: white; z-index: 25; overflow: hidden; opacity: 0; transition: opacity 0.3s ease; pointer-events: none; }
         .mode-player .info-bar { opacity: 1; pointer-events: auto; }
         .info-bar-label { flex: 0 0 160px; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.3); font-size: 1.2rem; font-weight: 700; color: #FFD700; letter-spacing: 0.1rem; border-right: 1px solid rgba(255,255,255,0.2); }
@@ -612,13 +611,10 @@ const pkg = {
         .info-bar-code { font-weight: 700; color: #89CFF0; letter-spacing: 0.1rem; }
         .info-bar-title { font-weight: bold; }
         .info-bar-artist { opacity: 0.7; }
-        
         .score-hud { position: absolute; bottom: 2rem; right: 3rem; padding: 0.5rem 1.2rem; background: rgba(0,0,0,0.7); border: 1px solid rgba(255,255,255,0.2); border-radius: 0.5rem; font-family: 'Rajdhani', sans-serif; color: white; z-index: 26; display: flex; flex-direction: row; align-items: baseline; gap: 0.75rem; opacity: 0; transition: opacity 0.3s ease, bottom 0.3s ease; pointer-events: none; }
         .score-hud.visible { opacity: 1; }
         .score-hud-label { font-size: 1rem; font-weight: 700; color: #FFD700; letter-spacing: 0.1rem; }
         .score-hud-value { font-size: 2.5rem; font-weight: 700; color: #89CFF0; letter-spacing: 0.1rem; line-height: 1; }
-
-        /* --- DETAILED SCORE SCREEN STYLES --- */
         .post-song-score-screen { position: absolute; inset: 0; background: rgba(0,0,0,0.7); backdrop-filter: blur(10px); display: flex; flex-direction: column; align-items: center; justify-content: center; color: white; z-index: 50; opacity: 0; transition: opacity 0.5s ease; pointer-events: none; }
         .post-song-score-screen.visible { opacity: 1; pointer-events: all; }
         .score-card { background: linear-gradient(145deg, rgba(20, 20, 40, 0.85), rgba(10, 10, 20, 0.9)); border: 1px solid rgba(137, 207, 240, 0.4); border-radius: 1rem; width: 90%; max-width: 900px; padding: 2rem; box-shadow: 0 10px 30px rgba(0,0,0,0.5); font-family: 'Rajdhani', sans-serif; }
@@ -710,7 +706,6 @@ const pkg = {
       .class("search-results-container")
       .appendTo(searchWindow);
 
-    // --- Player UI Structure with Countdown ---
     const introCard = new Html("div").class("intro-card").appendTo(playerUi);
     const introCardTitle = new Html("div")
       .class("intro-card-title")
@@ -750,11 +745,9 @@ const pkg = {
       .class("progress-bar")
       .appendTo(playerProgress);
 
-    // --- Countdown and Lyric State Variables (scoped to start function) ---
     let countdownTimers = [];
     let nextLineUpdateTimeout = null;
 
-    // --- SCORE ANIMATION HELPERS ---
     function animateNumber(element, target, duration, isFloat = true) {
       return new Promise((resolve) => {
         let start = 0;
@@ -805,7 +798,6 @@ const pkg = {
     }
 
     async function showPostSongScreen(scoreData) {
-      // Reset initial state
       finalScoreDisplay.text("0.00");
       [keyRhythmGauge, vibratoGauge, upbandGauge, downbandGauge].forEach(
         ({ gauge, valueDisplay }) => {
@@ -817,11 +809,9 @@ const pkg = {
       postSongScoreScreen.classOn("visible");
       Forte.playSfx("/assets/audio/score_tally.wav");
 
-      // Animate final score first
       await new Promise((r) => setTimeout(r, 500));
       await animateNumber(finalScoreDisplay, scoreData.finalScore, 2000, true);
 
-      // Animate all four gauges simultaneously
       await Promise.all([
         animateGauge(keyRhythmGauge, scoreData.details.pitchAndRhythm, 1500),
         animateGauge(vibratoGauge, scoreData.details.vibrato, 1500),
@@ -829,14 +819,12 @@ const pkg = {
         animateGauge(downbandGauge, scoreData.details.downband, 1500),
       ]);
 
-      await new Promise((r) => setTimeout(r, 4000)); // Hold the final score on screen
+      await new Promise((r) => setTimeout(r, 4000));
       postSongScoreScreen.classOff("visible");
 
-      // Wait for the fade-out animation to complete before resolving
-      await new Promise((r) => setTimeout(r, 500)); // Match the CSS transition duration
+      await new Promise((r) => setTimeout(r, 500));
     }
 
-    // --- NEW: CALIBRATION SCREEN ---
     const calibrationScreen = new Html("div")
       .styleJs({
         position: "absolute",
@@ -1007,9 +995,9 @@ const pkg = {
     });
 
     const startPlayer = async (song) => {
-      await Romanizer.init();
+      // --- REMOVED: Unnecessary init call ---
+      // await Romanizer.init();
 
-      // Clear all timers from previous song
       if (nextLineUpdateTimeout) clearTimeout(nextLineUpdateTimeout);
       countdownTimers.forEach(clearTimeout);
       nextLineUpdateTimeout = null;
@@ -1043,6 +1031,7 @@ const pkg = {
       introCard.classOff("visible");
 
       state.currentSongIsYouTube = song.path.startsWith("yt://");
+      state.currentSongIsMV = !!song.videoPath;
 
       state.reservationNumber = "";
       setMode("player");
@@ -1067,15 +1056,19 @@ const pkg = {
         midiLyricsContainer.classOn("hidden");
         playerProgress.classOn("hidden");
       } else {
+        let mvPlayer = null;
         lrcLyricsContainer.styleJs({ opacity: "0" });
         midiLyricsContainer.styleJs({ opacity: "0" });
 
-        if (
-          BGVPlayer.videoElements.length > 0 &&
-          !BGVPlayer.videoElements[0].hasAttribute("src")
-        ) {
-          BGVPlayer.start();
+        if (state.currentSongIsMV) {
+          console.log(`[Encore] Playing MV: ${song.videoPath}`);
+          const videoUrl = new URL("http://127.0.0.1:9864/getFile");
+          videoUrl.searchParams.append("path", song.videoPath);
+          mvPlayer = await BGVPlayer.playSingleVideo(videoUrl.href);
+        } else {
+          BGVPlayer.resumePlaylist();
         }
+
         bgvContainer.classOff("hidden");
         youtubePlayerContainer.classOn("hidden");
         youtubeIframe.attr({ src: "" });
@@ -1151,13 +1144,16 @@ const pkg = {
           const lines = [];
           let currentLineSyllables = [];
           let displayableSyllableIndex = 0;
-          playbackState.decodedLyrics.forEach((syllableText) => {
+
+          // --- REFACTORED: MIDI lyrics with async romanizer ---
+          for (const syllableText of playbackState.decodedLyrics) {
             const isNewLine = /[\r\n\/\\]/.test(syllableText);
             const cleanText = syllableText.replace(/[\r\n\/\\]/g, "");
             if (cleanText) {
+              const romanized = await Romanizer.romanize(cleanText);
               const syllable = {
                 text: cleanText,
-                romanized: Romanizer.romanize(cleanText),
+                romanized: romanized,
                 globalIndex: displayableSyllableIndex,
                 lineIndex: lines.length,
               };
@@ -1169,7 +1165,7 @@ const pkg = {
               lines.push(currentLineSyllables);
               currentLineSyllables = [];
             }
-          });
+          }
           if (currentLineSyllables.length > 0) lines.push(currentLineSyllables);
 
           const displayLines = [midiLineDisplay1, midiLineDisplay2];
@@ -1239,20 +1235,23 @@ const pkg = {
           const lrcText = await FsSvc.readFile(song.lrcPath);
           const timeRegex = /\[(\d{2}):(\d{2})\.(\d{2,3})\]/;
           if (lrcText) {
-            lrcParsedLyrics = lrcText
-              .split("\n")
-              .map((line) => {
-                const match = line.match(timeRegex);
-                if (!match) return null;
-                const time =
-                  parseInt(match[1]) * 60 +
-                  parseInt(match[2]) +
-                  parseInt(match[3].padEnd(3, "0")) / 1000;
-                const text = line.replace(timeRegex, "").trim();
-                const romanized = Romanizer.romanize(text);
-                return text ? { time, text, romanized } : null;
-              })
-              .filter(Boolean);
+            // --- REFACTORED: LRC lyrics with async romanizer ---
+            const lines = lrcText.split("\n");
+            const lyricPromises = lines.map(async (line) => {
+              const match = line.match(timeRegex);
+              if (!match) return null;
+              const time =
+                parseInt(match[1]) * 60 +
+                parseInt(match[2]) +
+                parseInt(match[3].padEnd(3, "0")) / 1000;
+              const text = line.replace(timeRegex, "").trim();
+              if (!text) return null;
+              const romanized = await Romanizer.romanize(text);
+              return { time, text, romanized };
+            });
+            lrcParsedLyrics = (await Promise.all(lyricPromises)).filter(
+              Boolean,
+            );
           }
         }
 
@@ -1298,16 +1297,46 @@ const pkg = {
             renderLrcLine(lrcDisplayLines[1], lrcParsedLyrics[1]);
             lrcDisplayLines[1].classOn("next");
 
-            // Check for intro countdown
             if (lrcParsedLyrics[0].time > 8.0) {
               scheduleCountdown(lrcParsedLyrics[0].time, 0);
             }
           }
+          if (mvPlayer) mvPlayer.play().catch(console.error);
           Forte.playTrack();
         }, PRE_ROLL_DELAY_MS);
         timeUpdateHandler = (e) => {
           const { currentTime, duration } = e.detail;
           progressBar.styleJs({ width: `${(currentTime / duration) * 100}%` });
+
+          if (mvPlayer) {
+            const TOLERANCE_MS = 50;
+            const HARD_SYNC_THRESHOLD_MS = 500;
+            const CORRECTION_RATE = 1.05;
+
+            const targetVideoTime = currentTime + state.videoSyncOffset / 1000;
+            const driftMs = (targetVideoTime - mvPlayer.currentTime) * 1000;
+
+            if (Math.abs(driftMs) > HARD_SYNC_THRESHOLD_MS) {
+              console.warn(
+                `[MV Sync] Hard resync. Drift: ${driftMs.toFixed(
+                  0,
+                )}ms. Seeking.`,
+              );
+              mvPlayer.currentTime = targetVideoTime;
+              mvPlayer.playbackRate = 1.0;
+            } else if (Math.abs(driftMs) > TOLERANCE_MS) {
+              if (driftMs > 0) {
+                mvPlayer.playbackRate = CORRECTION_RATE;
+              } else {
+                mvPlayer.playbackRate = 1.0 / CORRECTION_RATE;
+              }
+            } else {
+              if (mvPlayer.playbackRate !== 1.0) {
+                mvPlayer.playbackRate = 1.0;
+              }
+            }
+          }
+
           if (lrcParsedLyrics.length === 0 || playbackState.isMidi) return;
           let newIndex = -1;
           for (let i = lrcParsedLyrics.length - 1; i >= 0; i--)
@@ -1349,7 +1378,6 @@ const pkg = {
             let lineDurationMs = 5000;
             if (nextLine) {
               lineDurationMs = (nextLine.time - currentLine.time) * 1000;
-              // Check for interlude countdown
               if (lineDurationMs / 1000 > 8.0) {
                 scheduleCountdown(nextLine.time, currentTime);
               }
@@ -1377,7 +1405,6 @@ const pkg = {
 
       Forte.stopTrack();
 
-      // Clear all timers
       if (nextLineUpdateTimeout) clearTimeout(nextLineUpdateTimeout);
       countdownTimers.forEach(clearTimeout);
       nextLineUpdateTimeout = null;
@@ -1400,30 +1427,25 @@ const pkg = {
           scoreUpdateHandler,
         );
       ScoreHUD.hide();
-      InfoBar.showDefault(); // Reset info bar
+      InfoBar.showDefault();
       timeUpdateHandler = null;
       lyricEventHandler = null;
       scoreUpdateHandler = null;
       lastPlaybackStatus = null;
       state.currentSongIsYouTube = false;
       state.currentSongIsMultiplexed = false;
+      state.currentSongIsMV = false;
     };
 
     const transitionAfterSong = () => {
       if (state.reservationQueue.length > 0) {
         const nextCode = state.reservationQueue.shift();
-        InfoBar.showDefault(); // Update to show next song (or lack thereof)
+        InfoBar.showDefault();
         const nextSong = songMap.get(nextCode);
         if (nextSong) {
           setTimeout(() => startPlayer(nextSong), 250);
         }
       } else {
-        if (
-          BGVPlayer.videoElements.length > 0 &&
-          !BGVPlayer.videoElements[0].hasAttribute("src")
-        ) {
-          BGVPlayer.start();
-        }
         setMode("menu");
         window.desktopIntegration.ipc.send("setRPC", {
           details: `Browsing ${songList.length} Songs...`,
@@ -1450,9 +1472,9 @@ const pkg = {
         state.mode === "player" ? "reservationNumber" : "songNumber";
 
       if (state[target].length >= maxLength) {
-        state[target] = digit; // Reset with the new digit
+        state[target] = digit;
       } else {
-        state[target] += digit; // Append
+        state[target] += digit;
       }
 
       if (state.mode !== "player") {
@@ -1530,7 +1552,7 @@ const pkg = {
               state.isTransitioning = false;
             }, 1000);
           } else {
-            Forte.stopTrack(); // This will trigger the playbackUpdateHandler
+            Forte.stopTrack();
           }
         }
       } else if (state.mode === "yt-search") {
@@ -1573,6 +1595,25 @@ const pkg = {
       Forte.setTranspose(newTranspose);
       const sign = newTranspose > 0 ? "+" : "";
       InfoBar.show("TRANSPOSE", `${sign}${newTranspose}`, { duration: 3000 });
+    };
+
+    const handleVideoSync = (direction) => {
+      if (state.mode !== "player" || !state.currentSongIsMV) return;
+
+      const change = direction === "up" ? 10 : -10;
+      state.videoSyncOffset += change;
+
+      const sign = state.videoSyncOffset > 0 ? "+" : "";
+      InfoBar.show("VIDEO SYNC", `${sign}${state.videoSyncOffset} ms`, {
+        duration: 3000,
+      });
+
+      const updatedConfig = JSON.parse(JSON.stringify(config));
+      if (!updatedConfig.videoConfig) {
+        updatedConfig.videoConfig = {};
+      }
+      updatedConfig.videoConfig.syncOffset = state.videoSyncOffset;
+      window.desktopIntegration.ipc.send("updateConfig", updatedConfig);
     };
 
     const handleMultiplexPan = (direction) => {
@@ -1680,9 +1721,13 @@ const pkg = {
         handleMultiplexPan("right");
       } else if (e.key === "-") handleVolume("down");
       else if (e.key === "=") handleVolume("up");
-      else if (e.key === "[" || e.key === "]")
-        BGVPlayer.cycleCategory(e.key === "[" ? -1 : 1);
-      else if (e.key.toLowerCase() === "y" && state.mode === "menu")
+      else if (e.key === "[" || e.key === "]") {
+        if (state.currentSongIsMV) {
+          handleVideoSync(e.key === "]" ? "up" : "down");
+        } else {
+          BGVPlayer.cycleCategory(e.key === "[" ? -1 : 1);
+        }
+      } else if (e.key.toLowerCase() === "y" && state.mode === "menu")
         setMode("yt-search");
     };
 
@@ -1696,7 +1741,7 @@ const pkg = {
           handleBackspace();
           break;
         case "reserve":
-        case "enter": // Now used by remote's "OK" button in search
+        case "enter":
           handleEnter();
           break;
         case "stop":
@@ -1720,21 +1765,16 @@ const pkg = {
         case "pan_right":
           handleMultiplexPan("right");
           break;
-        // --- STATE-AWARE COMMANDS ---
         case "yt_search_open":
-          // Only open search if in the main menu
           if (state.mode === "menu") {
             setMode("yt-search");
           }
           break;
         case "yt_search_close":
-          // Only close search if it's currently open
           if (state.mode === "yt-search") {
             setMode("menu");
           }
           break;
-
-        // --- SEARCH-SPECIFIC COMMANDS ---
         case "nav_up":
           handleSearchNav("up");
           break;
@@ -1742,7 +1782,6 @@ const pkg = {
           handleSearchNav("down");
           break;
         case "yt_search_query":
-          // Correctly set the value on the underlying DOM element
           searchInput.elm.value = data.value;
           performSearch();
           break;
@@ -1761,9 +1800,14 @@ const pkg = {
         status === "stopped"
       ) {
         state.isTransitioning = true;
-
         const wasMultiplexed = state.currentSongIsMultiplexed;
+        const wasMV = state.currentSongIsMV;
+
         ScoreHUD.hide();
+
+        if (wasMV) {
+          await BGVPlayer.resumePlaylist();
+        }
 
         if (wasMultiplexed) {
           const finalScoreData = Forte.getPlaybackState().score;
@@ -1775,7 +1819,7 @@ const pkg = {
 
         setTimeout(() => {
           state.isTransitioning = false;
-        }, 1500); // Increased delay to be safer
+        }, 1500);
       }
       lastPlaybackStatus = status;
     };
@@ -1786,16 +1830,14 @@ const pkg = {
 
     window.addEventListener("keydown", keydownHandler);
 
-    // --- APP INITIALIZATION SEQUENCE ---
     wrapper.classOn("loading");
-    calibrationScreen.styleJs({ opacity: 1, pointerEvents: "all" });
-    await Forte.runLatencyTest();
-    calibrationScreen.styleJs({ opacity: 0 });
-    await new Promise((r) => setTimeout(r, 500)); // wait for fade out
+    await new Promise((r) => setTimeout(r, 500));
     calibrationScreen.cleanup();
 
     await BGVPlayer.init(bgvContainer);
-    BGVPlayer.start();
+    if (!BGVPlayer.isManualMode) {
+      BGVPlayer.start();
+    }
 
     setTimeout(() => {
       wrapper.classOff("loading");

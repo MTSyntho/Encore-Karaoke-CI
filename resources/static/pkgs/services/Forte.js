@@ -64,7 +64,7 @@ const state = {
       downband: 0, // %
     },
     // --- NEW: Latency ---
-    measuredLatencyS: 0.05, // A sensible default (50ms) before calibration
+    measuredLatencyS: 0.15, // A sensible default (50ms) before calibration
 
     // --- NEW: Internal trackers for the criteria ---
     // Pitch & Rhythm
@@ -1102,6 +1102,7 @@ const pkg = {
     },
 
     // --- NEW: LATENCY CALIBRATION FUNCTION ---
+    // Broken as hell, not in use
     /**
      * Performs an automatic audio latency test.
      * Your UI should call this function and instruct the user to be quiet.

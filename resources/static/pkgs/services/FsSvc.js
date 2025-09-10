@@ -199,6 +199,8 @@ const pkg = {
       const newSongList = [];
       let songCodeCounter = 1;
       const audioExtensions = new Set(["wav", "mp3", "m4a"]);
+      // --- MODIFIED: Added video extensions for lookup ---
+      const videoExtensions = new Set(["mp4", "mkv", "webm", "avi"]);
       const allFilenames = new Set(files.map((f) => f.name));
 
       const processableFiles = files.filter(
@@ -236,6 +238,17 @@ const pkg = {
         }
         // --- END: MODIFIED LOGIC FOR MULTIPLEX SUPPORT ---
 
+        // --- START: NEW LOGIC TO FIND ASSOCIATED VIDEO FILE ---
+        let videoPath = null;
+        for (const videoExt of videoExtensions) {
+          const potentialVideoName = `${basename}.${videoExt}`;
+          if (allFilenames.has(potentialVideoName)) {
+            videoPath = `${libraryPath}${potentialVideoName}`;
+            break; // Found a video, no need to check other extensions
+          }
+        }
+        // --- END: NEW LOGIC TO FIND ASSOCIATED VIDEO FILE ---
+
         let songData = null;
         let artist = "Unknown Artist";
         let title = basename.replace(/\[.*?\]/g, "").trim();
@@ -245,7 +258,6 @@ const pkg = {
           allFilenames.has(`${basename}.lrc`)
         ) {
           songData = {
-            // --- MODIFIED: Set type based on whether the file is multiplexed ---
             type: isMultiplexed ? "multiplexed" : "audio",
             lrcPath: `${libraryPath}${basename}.lrc`,
           };
@@ -288,6 +300,8 @@ const pkg = {
             type: songData.type,
             path: fullPath,
             lrcPath: songData.lrcPath,
+            // --- MODIFIED: Added videoPath to the song object ---
+            videoPath: videoPath,
           });
         }
 

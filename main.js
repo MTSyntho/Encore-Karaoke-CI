@@ -1,5 +1,6 @@
 if (require("electron-squirrel-startup")) app.quit();
 
+const KuromojiAnalyzer = require("kuroshiro-analyzer-kuromoji");
 const YouTubeCastReceiver = require("yt-cast-receiver");
 const youtubesearchapi = require("youtube-search-api");
 const { app, BrowserWindow, ipcMain } = require("electron");
@@ -9,6 +10,7 @@ const { Player } = require("yt-cast-receiver");
 const { Worker } = require("worker_threads");
 const ytdl = require("@distube/ytdl-core");
 const { Server } = require("socket.io");
+const Kuroshiro = require("kuroshiro").default;
 const express = require("express");
 const mime = require("mime-types");
 const crypto = require("crypto");
@@ -23,6 +25,9 @@ const port = 9864;
 const server = express();
 const serverHttp = http.createServer(server);
 const io = new Server(serverHttp);
+
+const kuroshiro = new Kuroshiro();
+kuroshiro.init(new KuromojiAnalyzer());
 
 let userData = app.getPath("userData");
 console.log("userData", userData);
@@ -527,6 +532,9 @@ app.whenReady().then(() => {
     console.log(`[YouTube] Searching for ${searchTerm}...`);
     let results = await youtubesearchapi.GetListByKeyword(searchTerm, false);
     res.status(200).json(results);
+  });
+  server.get("/romanize", async (req, res) => {
+    res.send(await kuroshiro.convert(req.query.t, { to: "romaji" }));
   });
 
   server.use(express.static("public"));
