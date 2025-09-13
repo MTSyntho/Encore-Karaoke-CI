@@ -13,6 +13,7 @@ let lastPlaybackStatus = null;
 const config = await window.desktopIntegration.ipc.invoke("getConfig");
 
 // --- BGVPlayer Module ---
+// ... (This module is unchanged)
 const BGVPlayer = {
   videoElements: [],
   playlist: [],
@@ -146,7 +147,6 @@ const BGVPlayer = {
     if (this.selectedCategory === "Auto") {
       for (const cat of this.categories) {
         if (cat.isAbsolute) {
-          // For MTVs with full paths
           const urls = cat.BGV_LIST.map((videoPath) => {
             const url = new URL("http://127.0.0.1:9864/getFile");
             url.searchParams.append("path", videoPath);
@@ -154,7 +154,6 @@ const BGVPlayer = {
           });
           allVideos.push(...urls);
         } else {
-          // For regular BGVs with relative paths
           const urls = cat.BGV_LIST.map(
             (videoPath) => assetBaseUrl + videoPath,
           );
@@ -288,6 +287,7 @@ const BGVPlayer = {
 };
 
 // --- Romanizer Module ---
+// ... (This module is unchanged)
 const Romanizer = {
   getPlaceholder(text, placeholderChar) {
     return text.replace(/\S/g, placeholderChar);
@@ -295,7 +295,6 @@ const Romanizer = {
   async romanize(text) {
     if (!text || !text.trim()) return null;
 
-    // Japanese check: Use server endpoint
     if (/[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/.test(text)) {
       try {
         const params = new URLSearchParams({ t: text });
@@ -307,15 +306,13 @@ const Romanizer = {
           );
           return null;
         }
-        const data = await res.text();
-        return data;
+        return await res.text();
       } catch (err) {
         console.error(`[Romanizer] Network error during romanization:`, err);
         return null;
       }
     }
 
-    // Korean check (unchanged)
     if (/[\uac00-\ud7af]/.test(text)) {
       return Aromanize.romanize(text);
     }
@@ -325,6 +322,7 @@ const Romanizer = {
 };
 
 // --- InfoBar Module ---
+// ... (This module is unchanged)
 const InfoBar = {
   bar: null,
   labelEl: null,
@@ -363,20 +361,21 @@ const InfoBar = {
 
   showDefault() {
     this.isPersistent = false;
-    const { reservationQueue, songMap } = this.context();
+    const { reservationQueue } = this.context();
     if (reservationQueue.length > 0) {
-      const nextCode = reservationQueue[0];
-      const nextSong = songMap.get(nextCode);
+      const nextSong = reservationQueue[0];
       const extra =
         reservationQueue.length > 1 ? ` (+${reservationQueue.length - 1})` : "";
 
       if (nextSong) {
-        const content = `<span class.info-bar-code">${nextSong.code}</span>
+        const codeSpan = nextSong.code
+          ? `<span class="info-bar-code">${nextSong.code}</span>`
+          : `<span class="info-bar-code is-youtube">YT</span>`;
+
+        const content = `${codeSpan}
                          <span class="info-bar-title">${nextSong.title}</span>
                          <span class="info-bar-artist">- ${nextSong.artist}${extra}</span>`;
         this.show("UP NEXT", content);
-      } else {
-        this.show("UP NEXT", `Song ${nextCode}${extra}`);
       }
     } else {
       this.show("UP NEXT", "—");
@@ -407,6 +406,7 @@ const InfoBar = {
 };
 
 // --- ScoreHUD Module ---
+// ... (This module is unchanged)
 const ScoreHUD = {
   hud: null,
   scoreDisplay: null,
@@ -471,6 +471,7 @@ const pkg = {
       searchResults: [],
       highlightedSearchIndex: -1,
       isSearching: false,
+      isSearchOverlayVisible: false,
       currentSongIsYouTube: false,
       currentSongIsMultiplexed: false,
       currentSongIsMV: false,
@@ -498,9 +499,7 @@ const pkg = {
     const youtubeIframe = new Html("iframe").appendTo(youtubePlayerContainer);
 
     const overlay = new Html("div").class("overlay-ui").appendTo(wrapper);
-    const searchUi = new Html("div")
-      .class("search-ui", "hidden")
-      .appendTo(wrapper);
+    const searchUi = new Html("div").class("search-ui").appendTo(wrapper);
     const playerUi = new Html("div")
       .class("player-ui", "hidden")
       .appendTo(wrapper);
@@ -563,6 +562,7 @@ const pkg = {
     new Html("style")
       .text(
         `
+        /* ... (General styles are unchanged) ... */
         .loading * { opacity: 0 !important; }
         .bgv-container { position: absolute; inset: 0; background-color: #000; overflow: hidden; z-index: 1; }
         .youtube-player-container { position: absolute; inset: 0; z-index: 2; background: #000; }
@@ -585,12 +585,86 @@ const pkg = {
         .song-list-container { flex-grow: 1; overflow-y: auto; }
         .song-item { display: flex; padding: 0.5rem; border-bottom: 1px solid rgba(255,255,255,0.1); transition: background-color 0.2s; } .song-item.highlighted { background-color: #89CFF044; }
         .song-item-code { font-family: 'Rajdhani', sans-serif; font-weight: 700; width: 80px; color: #89CFF0; } .song-item-title { flex-grow: 1; } .song-item-artist { width: 30%; text-align: right; opacity: 0.7; }
-        .search-ui { position: absolute; inset: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(10px); display: flex; align-items: center; justify-content: center; transition: opacity 0.3s ease-out; z-index: 20; }
-        .search-window { width: 90%; max-width: 1200px; height: 80vh; background: rgba(10,10,20,0.8); border: 1px solid rgba(255,255,255,0.2); border-radius: 0.5rem; padding: 1.5rem; display: flex; flex-direction: column; gap: 1.5rem; }
-        .search-input { font-family: 'Rajdhani', sans-serif; font-size: 2rem; background: rgba(0,0,0,0.4); border: 2px solid rgba(255,255,255,0.3); border-radius: 0.5rem; color: white; padding: 0.8rem 1.2rem; width: 100%; text-align: center; outline: none; transition: all 0.2s ease; flex-shrink: 0; }
+
+        /* REVISION: Final Polished Spotlight Search Styling */
+        .search-ui {
+            position: absolute;
+            display: flex;
+            z-index: 20;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s ease-out;
+            /* Base position for overlay to prevent flash */
+            top: calc(2rem + 50px + 1rem);
+            left: 0;
+            right: 0;
+            bottom: auto;
+            align-items: flex-start;
+            justify-content: center;
+        }
+        .mode-yt-search .search-ui,
+        .search-overlay-active .search-ui {
+            opacity: 1;
+            pointer-events: all;
+        }
+
+        .mode-yt-search .search-ui {
+            /* Override to full screen */
+            inset: 0;
+            padding-top: 0;
+            background: rgba(0,0,0,0.6);
+            backdrop-filter: blur(10px);
+            align-items: center;
+        }
+        .mode-yt-search .search-window {
+            width: 90%;
+            max-width: 1200px;
+            height: 80vh;
+            background: rgba(10,10,20,0.8);
+            gap: 1.5rem;
+            padding: 1.5rem;
+        }
+        
+        .search-window {
+            border: 1px solid rgba(137, 207, 240, 0.4);
+            border-radius: 0.5rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0;
+            transition: height 0.25s ease-in-out, box-shadow 0.25s ease-in-out;
+            overflow: hidden;
+        }
+        
+        .search-overlay-active .search-window {
+            background: rgba(10, 10, 20, 0.95);
+            width: 60vw;
+            max-width: 800px;
+            height: auto;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+        }
+        .search-overlay-active .search-input { padding: 1.2rem; }
+        .search-overlay-active .search-results-container {
+            max-height: 0;
+            overflow-y: auto;
+            transition: max-height 0.25s ease-in-out;
+            border-top: none;
+        }
+
+        .search-overlay-active .search-window.has-results {
+             box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+        .search-overlay-active .search-window.has-results .search-results-container {
+             max-height: 50vh;
+             border-top: 1px solid rgba(255,255,255,0.2);
+             padding: 1rem;
+        }
+
+        .search-input { font-family: 'Rajdhani', sans-serif; font-size: 2rem; background: rgba(0,0,0,0.4); border: 2px solid rgba(255,255,255,0.3); border-radius: 0.5rem; color: white; width: 100%; text-align: center; outline: none; transition: all 0.2s ease; flex-shrink: 0; }
         .search-input:focus { border-color: #89CFF0; box-shadow: 0 0 20px #89CFF066; }
-        .search-results-container { flex-grow: 1; overflow-y: auto; }
+        
+        .search-window:not(.has-results) .search-results-container { padding: 0; }
         .search-result-item { display: flex; align-items: center; gap: 1rem; padding: 0.5rem; border-bottom: 1px solid rgba(255,255,255,0.1); transition: background-color 0.2s; }
+        .search-result-item:last-child { border-bottom: none; }
         .search-result-item.highlighted { background-color: #89CFF044; }
         .search-thumbnail-wrapper { position: relative; }
         .search-thumbnail { width: 120px; height: 68px; object-fit: cover; border-radius: 0.25rem; flex-shrink: 0; }
@@ -598,7 +672,13 @@ const pkg = {
         .search-info { display: flex; flex-direction: column; overflow: hidden; }
         .search-title { font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .search-channel { font-size: 0.9rem; opacity: 0.7; }
-        .player-ui { position: absolute; inset: 0; padding: 2rem; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; transition: opacity 0.3s ease-out; background: linear-gradient(to top, rgba(0,0,0,0.9) 0%, transparent 50%); z-index: 15; padding-bottom: 5vh; }
+        
+        .player-ui { position: absolute; inset: 0; padding: 2rem; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; transition: background 0.3s ease-out; background: linear-gradient(to top, rgba(0,0,0,0.9) 0%, transparent 50%); z-index: 15; padding-bottom: 5vh; }
+        .mode-player-youtube .player-ui {
+            background: transparent;
+        }
+
+        /* ... (rest of styles are unchanged) ... */
         .player-bottom-section { width: 100%; max-width: 1200px; display: flex; flex-direction: column; align-items: center; gap: 1rem; }
         .countdown-display { width: 9rem; height: 9rem; display: flex; align-items: center; justify-content: center; border-radius: 50%; background: radial-gradient(circle at 50% 120%, #f7b733, #fc4a1a); font-family: 'Rajdhani', sans-serif; font-weight: 900; font-size: 6rem; color: #000; text-shadow: 2px 2px 4px rgba(0,0,0,0.3); box-shadow: inset 0 0 10px rgba(0,0,0,0.5), 0 5px 15px rgba(0,0,0,0.4); border: 4px solid #4d4d4d; opacity: 0; transform: scale(0.8); transition: opacity 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275), transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); pointer-events: none; line-height: 1; }
         .countdown-display.visible { opacity: 1; transform: scale(1); }
@@ -634,6 +714,7 @@ const pkg = {
         .info-bar-label { flex: 0 0 160px; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.3); font-size: 1.2rem; font-weight: 700; color: #FFD700; letter-spacing: 0.1rem; border-right: 1px solid rgba(255,255,255,0.2); }
         .info-bar-content { flex-grow: 1; display: flex; align-items: center; gap: 1rem; padding: 0 1.5rem; font-size: 1.6rem; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .info-bar-code { font-weight: 700; color: #89CFF0; letter-spacing: 0.1rem; }
+        .info-bar-code.is-youtube { color: #FF5555; letter-spacing: 0; }
         .info-bar-title { font-weight: bold; }
         .info-bar-artist { opacity: 0.7; }
         .score-hud { position: absolute; bottom: 2rem; right: 3rem; padding: 0.5rem 1.2rem; background: rgba(0,0,0,0.7); border: 1px solid rgba(255,255,255,0.2); border-radius: 0.5rem; font-family: 'Rajdhani', sans-serif; color: white; z-index: 26; display: flex; flex-direction: row; align-items: baseline; gap: 0.75rem; opacity: 0; transition: opacity 0.3s ease, bottom 0.3s ease; pointer-events: none; }
@@ -664,6 +745,7 @@ const pkg = {
       )
       .appendTo(wrapper);
 
+    // ... (UI element creation is unchanged) ...
     wrapper.classOn("loading");
     const leftPanel = new Html("div").class("left-panel").appendTo(overlay);
     const rightPanel = new Html("div").class("right-panel").appendTo(overlay);
@@ -769,13 +851,15 @@ const pkg = {
       .class("progress-bar")
       .appendTo(playerProgress);
 
+    // ... (Functions from here down are updated)
+    // ... (animateNumber, animateGauge, showPostSongScreen are unchanged)
     let countdownTimers = [];
     let nextLineUpdateTimeout = null;
 
     function animateNumber(element, target, duration, isFloat = true) {
       return new Promise((resolve) => {
         let start = 0;
-        const currentText = element.text();
+        const currentText = element.getText();
         if (currentText && !isNaN(parseFloat(currentText))) {
           start = parseFloat(currentText);
         }
@@ -822,6 +906,7 @@ const pkg = {
     }
 
     async function showPostSongScreen(scoreData) {
+      state.isTransitioning = true;
       finalScoreDisplay.text("0.00");
       [keyRhythmGauge, vibratoGauge, upbandGauge, downbandGauge].forEach(
         ({ gauge, valueDisplay }) => {
@@ -842,6 +927,7 @@ const pkg = {
       await new Promise((r) => setTimeout(r, 4000));
       postSongScoreScreen.classOff("visible");
       await new Promise((r) => setTimeout(r, 500));
+      state.isTransitioning = false;
     }
 
     const calibrationScreen = new Html("div")
@@ -870,13 +956,51 @@ const pkg = {
       .text("Please be quiet...")
       .appendTo(calibrationScreen);
 
+    const toggleSearchOverlay = (visible) => {
+      if (visible) {
+        state.isSearchOverlayVisible = true;
+        wrapper.classOn("search-overlay-active");
+        searchInput.elm.focus();
+        searchInput.elm.select();
+      } else {
+        state.isSearchOverlayVisible = false;
+        wrapper.classOff("search-overlay-active");
+        searchWindow.classOff("has-results");
+        searchInput.elm.blur();
+
+        setTimeout(() => {
+          if (state.isSearchOverlayVisible) return;
+          searchInput.val("");
+          state.searchResults = [];
+          state.highlightedSearchIndex = -1;
+          searchResultsContainer.clear();
+        }, 300);
+
+        if (state.mode === "player") {
+          if (state.reservationNumber.length > 0) {
+            InfoBar.showReservation(state.reservationNumber);
+          } else {
+            InfoBar.showDefault();
+          }
+        }
+      }
+    };
+
     const setMode = (newMode) => {
       state.mode = newMode;
-      wrapper.classOff("mode-menu", "mode-player", "mode-yt-search");
+      wrapper.classOff(
+        "mode-menu",
+        "mode-player",
+        "mode-yt-search",
+        "mode-player-youtube",
+      );
       wrapper.classOn(`mode-${newMode}`);
+
       overlay.classOn("hidden");
       playerUi.classOn("hidden");
-      searchUi.classOn("hidden");
+
+      if (state.isSearchOverlayVisible) toggleSearchOverlay(false);
+
       if (newMode === "menu") {
         overlay.classOff("hidden");
         searchInput.elm.blur();
@@ -885,10 +1009,52 @@ const pkg = {
         playerUi.classOff("hidden");
         InfoBar.showDefault();
       } else if (newMode === "yt-search") {
-        searchUi.classOff("hidden");
         searchInput.elm.focus();
         searchInput.elm.select();
       }
+    };
+
+    const renderSearchResults = () => {
+      searchResultsContainer.clear();
+      state.highlightedSearchIndex = -1;
+
+      if (state.isSearching) {
+        searchResultsContainer.text("Searching...");
+        searchWindow.classOff("has-results");
+        return;
+      }
+      if (state.searchResults.length === 0) {
+        searchResultsContainer.text("No results found.");
+        searchWindow.classOff("has-results");
+        return;
+      }
+
+      searchWindow.classOn("has-results");
+      state.searchResults.forEach((result) => {
+        const item = new Html("div")
+          .class("search-result-item")
+          .appendTo(searchResultsContainer);
+        const thumbWrapper = new Html("div")
+          .class("search-thumbnail-wrapper")
+          .appendTo(item);
+        new Html("img")
+          .class("search-thumbnail")
+          .attr({ src: result.thumbnail.thumbnails[0].url })
+          .appendTo(thumbWrapper);
+        if (result.length && result.length.simpleText) {
+          new Html("span")
+            .class("search-duration")
+            .text(result.length.simpleText)
+            .appendTo(thumbWrapper);
+        }
+        const info = new Html("div").class("search-info").appendTo(item);
+        new Html("div").class("search-title").text(result.title).appendTo(info);
+        new Html("div")
+          .class("search-channel")
+          .text(result.channelTitle)
+          .appendTo(info);
+      });
+      updateSearchHighlight();
     };
 
     const updateMenuUI = () => {
@@ -936,47 +1102,13 @@ const pkg = {
       });
     };
 
-    const renderSearchResults = () => {
-      searchResultsContainer.clear();
-      state.highlightedSearchIndex = -1;
-      if (state.isSearching) {
-        searchResultsContainer.text("Searching...");
-        return;
-      }
-      if (state.searchResults.length === 0) {
-        searchResultsContainer.text("No results found.");
-        return;
-      }
-      state.searchResults.forEach((result) => {
-        const item = new Html("div")
-          .class("search-result-item")
-          .appendTo(searchResultsContainer);
-        const thumbWrapper = new Html("div")
-          .class("search-thumbnail-wrapper")
-          .appendTo(item);
-        new Html("img")
-          .class("search-thumbnail")
-          .attr({ src: result.thumbnail.thumbnails[0].url })
-          .appendTo(thumbWrapper);
-        if (result.length && result.length.simpleText) {
-          new Html("span")
-            .class("search-duration")
-            .text(result.length.simpleText)
-            .appendTo(thumbWrapper);
-        }
-        const info = new Html("div").class("search-info").appendTo(item);
-        new Html("div").class("search-title").text(result.title).appendTo(info);
-        new Html("div")
-          .class("search-channel")
-          .text(result.channelTitle)
-          .appendTo(info);
-      });
-      updateSearchHighlight();
-    };
-
     const performSearch = async () => {
       const query = searchInput.getValue().trim();
-      if (!query) return;
+      if (!query) {
+        state.searchResults = [];
+        renderSearchResults();
+        return;
+      }
       state.isSearching = true;
       state.searchResults = [];
       renderSearchResults();
@@ -1005,6 +1137,7 @@ const pkg = {
     });
 
     const startPlayer = async (song) => {
+      state.isTransitioning = true;
       if (nextLineUpdateTimeout) clearTimeout(nextLineUpdateTimeout);
       countdownTimers.forEach(clearTimeout);
       nextLineUpdateTimeout = null;
@@ -1037,7 +1170,12 @@ const pkg = {
       state.currentSongIsYouTube = song.path.startsWith("yt://");
       state.currentSongIsMV = !!song.videoPath;
       state.reservationNumber = "";
+
       setMode("player");
+      if (state.currentSongIsYouTube) {
+        wrapper.classOn("mode-player-youtube");
+      }
+
       window.desktopIntegration.ipc.send("setRPC", {
         details: song.title,
         state: song.artist,
@@ -1055,6 +1193,7 @@ const pkg = {
         lrcLyricsContainer.classOn("hidden");
         midiLyricsContainer.classOn("hidden");
         playerProgress.classOn("hidden");
+        state.isTransitioning = false;
       } else {
         let mvPlayer = null;
         lrcLyricsContainer.styleJs({ opacity: "0" });
@@ -1095,34 +1234,30 @@ const pkg = {
             show1: (targetTime - 1 - currentTime) * 1000,
             hide: (targetTime - currentTime) * 1000,
           };
-          if (delays.show3 > 0) {
+          if (delays.show3 > 0)
             countdownTimers.push(
               setTimeout(() => {
                 countdownDisplay.text("3").classOn("visible");
               }, delays.show3),
             );
-          }
-          if (delays.show2 > 0) {
+          if (delays.show2 > 0)
             countdownTimers.push(
               setTimeout(() => {
                 countdownDisplay.text("2");
               }, delays.show2),
             );
-          }
-          if (delays.show1 > 0) {
+          if (delays.show1 > 0)
             countdownTimers.push(
               setTimeout(() => {
                 countdownDisplay.text("1");
               }, delays.show1),
             );
-          }
-          if (delays.hide > 0) {
+          if (delays.hide > 0)
             countdownTimers.push(
               setTimeout(() => {
                 countdownDisplay.classOff("visible").text("");
               }, delays.hide),
             );
-          }
         };
         if (playbackState.isMidi) {
           midiLyricsContainer.styleJs({ display: "flex" });
@@ -1193,8 +1328,7 @@ const pkg = {
               const nextDisplay = displayLines[(currentSongLineIndex + 1) % 2];
               activeDisplay.classOn("active").classOff("next");
               nextDisplay.classOff("active").classOn("next");
-              const lineToRender = lines[currentSongLineIndex + 1];
-              renderLine(nextDisplay, lineToRender);
+              renderLine(nextDisplay, lines[currentSongLineIndex + 1]);
             }
             const newSyllableEl = wrapper.qs(
               `.lyric-syllable-container[data-index="${index}"]`,
@@ -1241,7 +1375,10 @@ const pkg = {
         }
         const PRE_ROLL_DELAY_MS = 2500;
         setTimeout(() => {
-          if (state.mode !== "player") return;
+          if (state.mode !== "player") {
+            state.isTransitioning = false;
+            return;
+          }
           introCard.classOff("visible");
           lrcLyricsContainer.styleJs({ opacity: "1" });
           midiLyricsContainer.styleJs({ opacity: "1" });
@@ -1273,34 +1410,25 @@ const pkg = {
           }
           if (mvPlayer) mvPlayer.play().catch(console.error);
           Forte.playTrack();
+          state.isTransitioning = false;
         }, PRE_ROLL_DELAY_MS);
         timeUpdateHandler = (e) => {
           const { currentTime, duration } = e.detail;
           progressBar.styleJs({ width: `${(currentTime / duration) * 100}%` });
           if (mvPlayer) {
-            const TOLERANCE_MS = 50;
-            const HARD_SYNC_THRESHOLD_MS = 500;
-            const CORRECTION_RATE = 1.05;
+            const TOLERANCE_MS = 50,
+              HARD_SYNC_THRESHOLD_MS = 500,
+              CORRECTION_RATE = 1.05;
             const targetVideoTime = currentTime + state.videoSyncOffset / 1000;
             const driftMs = (targetVideoTime - mvPlayer.currentTime) * 1000;
             if (Math.abs(driftMs) > HARD_SYNC_THRESHOLD_MS) {
-              console.warn(
-                `[MV Sync] Hard resync. Drift: ${driftMs.toFixed(
-                  0,
-                )}ms. Seeking.`,
-              );
               mvPlayer.currentTime = targetVideoTime;
               mvPlayer.playbackRate = 1.0;
             } else if (Math.abs(driftMs) > TOLERANCE_MS) {
-              if (driftMs > 0) {
-                mvPlayer.playbackRate = CORRECTION_RATE;
-              } else {
-                mvPlayer.playbackRate = 1.0 / CORRECTION_RATE;
-              }
-            } else {
-              if (mvPlayer.playbackRate !== 1.0) {
-                mvPlayer.playbackRate = 1.0;
-              }
+              mvPlayer.playbackRate =
+                driftMs > 0 ? CORRECTION_RATE : 1.0 / CORRECTION_RATE;
+            } else if (mvPlayer.playbackRate !== 1.0) {
+              mvPlayer.playbackRate = 1.0;
             }
           }
           if (lrcParsedLyrics.length === 0 || playbackState.isMidi) return;
@@ -1394,9 +1522,8 @@ const pkg = {
 
     const transitionAfterSong = () => {
       if (state.reservationQueue.length > 0) {
-        const nextCode = state.reservationQueue.shift();
+        const nextSong = state.reservationQueue.shift();
         InfoBar.showDefault();
-        const nextSong = songMap.get(nextCode);
         if (nextSong) {
           setTimeout(() => startPlayer(nextSong), 250);
         }
@@ -1423,22 +1550,27 @@ const pkg = {
     };
 
     const handleDigitInput = (digit) => {
+      // REVISION: Corrected logic for targeting reservation number
       const target =
         state.mode === "player" ? "reservationNumber" : "songNumber";
-      if (state[target].length >= maxLength) {
-        state[target] = digit;
-      } else {
-        state[target] += digit;
-      }
+      state[target] =
+        state[target].length >= maxLength ? digit : state[target] + digit;
+
       if (state.mode !== "player") {
         Forte.playSfx(`/assets/audio/numbers/${digit}.wav`);
       }
-      if (state.mode === "player") InfoBar.showReservation(state[target]);
-      else updateMenuUI();
+
+      if (state.mode === "player") {
+        InfoBar.showReservation(state[target]);
+      } else {
+        updateMenuUI();
+      }
     };
 
     const handleBackspace = () => {
-      if (state.mode === "player") {
+      if (state.isSearchOverlayVisible && searchInput.getValue().length === 0) {
+        toggleSearchOverlay(false);
+      } else if (state.mode === "player" && !state.isSearchOverlayVisible) {
         if (state.reservationNumber.length > 0) {
           state.reservationNumber = state.reservationNumber.slice(0, -1);
           if (state.reservationNumber.length > 0) {
@@ -1464,12 +1596,33 @@ const pkg = {
       if (state.mode === "menu") {
         handleSubmit();
       } else if (state.mode === "player") {
-        if (state.reservationNumber.length > 0) {
-          const code = state.reservationNumber.padStart(maxLength, "0");
-          if (songMap.has(code)) {
-            state.reservationQueue.push(code);
-            state.reservationNumber = "";
-            InfoBar.showDefault();
+        if (state.isSearchOverlayVisible) {
+          if (state.highlightedSearchIndex !== -1) {
+            const video = state.searchResults[state.highlightedSearchIndex];
+            if (video) {
+              const songToReserve = {
+                title: video.title,
+                artist: video.channelTitle,
+                path: `yt://${video.id}`,
+              };
+              state.reservationQueue.push(songToReserve);
+              InfoBar.show(
+                "RESERVED",
+                `<span class="info-bar-code is-youtube">YT</span> ${songToReserve.title}`,
+                { duration: 4000 },
+              );
+              toggleSearchOverlay(false);
+            }
+          }
+        } else {
+          if (state.reservationNumber.length > 0) {
+            const code = state.reservationNumber.padStart(maxLength, "0");
+            const song = songMap.get(code);
+            if (song) {
+              state.reservationQueue.push(song);
+              state.reservationNumber = "";
+              InfoBar.showDefault();
+            }
           }
         }
       } else if (state.mode === "yt-search") {
@@ -1488,20 +1641,22 @@ const pkg = {
     };
 
     const handleEscape = () => {
-      if (state.mode === "player") {
-        if (state.isTransitioning) return;
+      if (state.isTransitioning) return;
+
+      if (state.isSearchOverlayVisible) {
+        toggleSearchOverlay(false);
+        return;
+      }
+
+      if (state.mode === "player" || state.mode === "mode-player-youtube") {
         if (state.reservationNumber.length > 0) {
           state.reservationNumber = "";
           InfoBar.showDefault();
         } else {
           if (state.currentSongIsYouTube) {
-            state.isTransitioning = true;
             stopPlayer();
             BGVPlayer.start();
             transitionAfterSong();
-            setTimeout(() => {
-              state.isTransitioning = false;
-            }, 1000);
           } else {
             Forte.stopTrack();
           }
@@ -1538,28 +1693,28 @@ const pkg = {
       if (state.mode !== "player" || state.currentSongIsYouTube) return;
       const playbackState = Forte.getPlaybackState();
       const change = direction === "up" ? 1 : -1;
-      const currentTranspose = playbackState.transpose || 0;
       const newTranspose = Math.max(
         -24,
-        Math.min(24, currentTranspose + change),
+        Math.min(24, (playbackState.transpose || 0) + change),
       );
       Forte.setTranspose(newTranspose);
-      const sign = newTranspose > 0 ? "+" : "";
-      InfoBar.show("TRANSPOSE", `${sign}${newTranspose}`, { duration: 3000 });
+      InfoBar.show(
+        "TRANSPOSE",
+        `${newTranspose > 0 ? "+" : ""}${newTranspose}`,
+        { duration: 3000 },
+      );
     };
 
     const handleVideoSync = (direction) => {
       if (state.mode !== "player" || !state.currentSongIsMV) return;
-      const change = direction === "up" ? 10 : -10;
-      state.videoSyncOffset += change;
-      const sign = state.videoSyncOffset > 0 ? "+" : "";
-      InfoBar.show("VIDEO SYNC", `${sign}${state.videoSyncOffset} ms`, {
-        duration: 3000,
-      });
+      state.videoSyncOffset += direction === "up" ? 10 : -10;
+      InfoBar.show(
+        "VIDEO SYNC",
+        `${state.videoSyncOffset > 0 ? "+" : ""}${state.videoSyncOffset} ms`,
+        { duration: 3000 },
+      );
       const updatedConfig = JSON.parse(JSON.stringify(config));
-      if (!updatedConfig.videoConfig) {
-        updatedConfig.videoConfig = {};
-      }
+      if (!updatedConfig.videoConfig) updatedConfig.videoConfig = {};
       updatedConfig.videoConfig.syncOffset = state.videoSyncOffset;
       window.desktopIntegration.ipc.send("updateConfig", updatedConfig);
     };
@@ -1574,18 +1729,12 @@ const pkg = {
         ),
       );
       Forte.setMultiplexPan(newPan);
-      let displayText = "";
-      if (newPan <= -0.99) {
-        displayText = "INSTRUMENTAL";
-      } else if (newPan >= 0.99) {
-        displayText = "VOCAL GUIDE";
-      } else if (newPan > -0.01 && newPan < 0.01) {
-        displayText = "BALANCED";
-      } else if (newPan < 0) {
+      let displayText = "BALANCED";
+      if (newPan <= -0.99) displayText = "INSTRUMENTAL";
+      else if (newPan >= 0.99) displayText = "VOCAL GUIDE";
+      else if (newPan < 0)
         displayText = `◀ ${Math.abs(Math.round(newPan * 100))}% INST`;
-      } else {
-        displayText = `VOC ${Math.round(newPan * 100)}% ▶`;
-      }
+      else if (newPan > 0) displayText = `VOC ${Math.round(newPan * 100)}% ▶`;
       InfoBar.show("VOCAL BALANCE", displayText, { duration: 3000 });
     };
 
@@ -1593,23 +1742,20 @@ const pkg = {
       if (state.mode !== "menu") return;
       const change = direction === "down" ? 1 : -1;
       state.songNumber = "";
-      let newIndex;
-      if (change > 0) {
+      let newIndex = state.highlightedIndex;
+      if (change > 0)
         newIndex = Math.min(
           songList.length - 1,
-          state.highlightedIndex < 0 ? 0 : state.highlightedIndex + 1,
+          newIndex < 0 ? 0 : newIndex + 1,
         );
-      } else {
-        newIndex = Math.max(0, state.highlightedIndex - 1);
-      }
-      if (newIndex !== state.highlightedIndex) {
+      else newIndex = Math.max(0, newIndex - 1);
+      if (newIndex !== state.highlightedIndex)
         state.highlightedIndex = newIndex;
-      }
       updateMenuUI();
     };
 
     const handleSearchNav = (direction) => {
-      if (state.mode !== "yt-search") return;
+      if (state.mode !== "yt-search" && !state.isSearchOverlayVisible) return;
       const change = direction === "down" ? 1 : -1;
       const isSearchInputFocused = document.activeElement === searchInput.elm;
       if (isSearchInputFocused && change > 0) {
@@ -1618,7 +1764,7 @@ const pkg = {
       } else if (
         !isSearchInputFocused &&
         change < 0 &&
-        state.highlightedSearchIndex === 0
+        state.highlightedSearchIndex <= 0
       ) {
         state.highlightedSearchIndex = -1;
         searchInput.elm.focus();
@@ -1634,31 +1780,40 @@ const pkg = {
       updateSearchHighlight();
     };
 
+    // REVISION: Final robust keydown handler with backspace fix
     keydownHandler = (e) => {
       const isSearchInputFocused = document.activeElement === searchInput.elm;
+
       if (isSearchInputFocused) {
         if (e.key === "Backspace" && searchInput.getValue().length === 0) {
           e.preventDefault();
           handleBackspace();
           return;
         }
-        if (["ArrowUp", "ArrowDown", "Enter", "Escape"].includes(e.key))
+        if (["ArrowUp", "ArrowDown", "Enter", "Escape"].includes(e.key)) {
           e.preventDefault();
-        else return;
+        } else {
+          return; // Allow all other keys (including Backspace with text) to type
+        }
       } else {
+        // Not focused, prevent default for all our commands
         e.preventDefault();
       }
+
+      // Command handling logic
       if (e.key >= "0" && e.key <= "9") handleDigitInput(e.key);
       else if (e.key === "Backspace") handleBackspace();
       else if (e.key === "Enter") handleEnter();
       else if (e.key === "Escape") handleEscape();
       else if (e.key === "ArrowUp") {
         if (state.mode === "menu") handleMenuNav("up");
-        else if (state.mode === "yt-search") handleSearchNav("up");
+        else if (state.mode === "yt-search" || state.isSearchOverlayVisible)
+          handleSearchNav("up");
         else if (state.mode === "player") handleTranspose("up");
       } else if (e.key === "ArrowDown") {
         if (state.mode === "menu") handleMenuNav("down");
-        else if (state.mode === "yt-search") handleSearchNav("down");
+        else if (state.mode === "yt-search" || state.isSearchOverlayVisible)
+          handleSearchNav("down");
         else if (state.mode === "player") handleTranspose("down");
       } else if (e.key === "ArrowLeft") {
         handleMultiplexPan("left");
@@ -1667,13 +1822,15 @@ const pkg = {
       } else if (e.key === "-") handleVolume("down");
       else if (e.key === "=") handleVolume("up");
       else if (e.key === "[" || e.key === "]") {
-        if (state.currentSongIsMV) {
+        if (state.currentSongIsMV)
           handleVideoSync(e.key === "]" ? "up" : "down");
-        } else {
-          BGVPlayer.cycleCategory(e.key === "[" ? -1 : 1);
-        }
-      } else if (e.key.toLowerCase() === "y" && state.mode === "menu")
-        setMode("yt-search");
+        else BGVPlayer.cycleCategory(e.key === "[" ? -1 : 1);
+      } else if (e.key.toLowerCase() === "y") {
+        if (state.isTransitioning) return;
+        if (state.mode === "menu") setMode("yt-search");
+        else if (state.mode === "player")
+          toggleSearchOverlay(!state.isSearchOverlayVisible);
+      }
     };
 
     socket.on("execute-command", (data) => {
@@ -1711,14 +1868,14 @@ const pkg = {
           handleMultiplexPan("right");
           break;
         case "yt_search_open":
-          if (state.mode === "menu") {
-            setMode("yt-search");
+          if (!state.isTransitioning) {
+            if (state.mode === "menu") setMode("yt-search");
+            else if (state.mode === "player") toggleSearchOverlay(true);
           }
           break;
         case "yt_search_close":
-          if (state.mode === "yt-search") {
-            setMode("menu");
-          }
+          if (state.mode === "yt-search") setMode("menu");
+          else if (state.isSearchOverlayVisible) toggleSearchOverlay(false);
           break;
         case "nav_up":
           handleSearchNav("up");
@@ -1734,30 +1891,31 @@ const pkg = {
     });
 
     playbackUpdateHandler = async (e) => {
-      if (state.isTransitioning) {
-        return;
-      }
       const { status } = e.detail || {};
       if (
-        state.mode === "player" &&
+        (state.mode === "player" || state.mode === "mode-player-youtube") &&
         lastPlaybackStatus === "playing" &&
         status === "stopped"
       ) {
+        if (state.isTransitioning) return;
         state.isTransitioning = true;
+
         const wasMultiplexed = state.currentSongIsMultiplexed;
         const wasMV = state.currentSongIsMV;
         ScoreHUD.hide();
         if (wasMV) {
           await BGVPlayer.resumePlaylist();
         }
+        stopPlayer();
         if (wasMultiplexed) {
           const finalScoreData = Forte.getPlaybackState().score;
           await showPostSongScreen(finalScoreData);
         }
-        stopPlayer();
+
         transitionAfterSong();
         setTimeout(() => {
-          state.isTransitioning = false;
+          if (state.reservationQueue.length === 0)
+            state.isTransitioning = false;
         }, 1500);
       }
       lastPlaybackStatus = status;
