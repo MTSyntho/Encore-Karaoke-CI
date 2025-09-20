@@ -61,35 +61,15 @@ let karaokeConfig = {
   setupComplete: false,
   libraryPath: "",
   audioConfig: {
-    bufferSize: 1024,
     mix: {
       instrumental: {
         outputDevice: null,
         volume: 1,
       },
-      vocal: {
+      // Vocal effects and buffer size are removed.
+      // We only need to store the mic used for scoring.
+      scoring: {
         inputDevice: null,
-        outputDevice: null,
-        volume: 1,
-        effects: [
-          { plugin: "NoiseGate", params: { threshold_db: -35 } },
-          { plugin: "HighpassFilter", params: { cutoff_frequency_hz: 100 } },
-          { plugin: "Gain", params: { gain_db: 5 } },
-          { plugin: "Compressor", params: { threshold_db: -18, ratio: 3.5 } },
-          { plugin: "Gain", params: { gain_db: 7 } },
-          {
-            plugin: "HighShelfFilter",
-            params: { cutoff_frequency_hz: 4438, gain_db: 2.4 },
-          },
-          {
-            plugin: "Reverb",
-            params: { room_size: 0.7, wet_level: 0.15 },
-          },
-          {
-            plugin: "PeakFilter",
-            params: { cutoff_frequency_hz: 676, gain_db: -2.5 },
-          },
-        ],
       },
     },
   },
