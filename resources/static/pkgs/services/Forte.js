@@ -65,7 +65,7 @@ const state = {
       downband: 0, // %
     },
     // --- NEW: Latency ---
-    measuredLatencyS: 0.15, // A sensible default (50ms) before calibration
+    measuredLatencyS: 0.15, // A sensible default (150ms) before calibration
 
     // --- NEW: Internal trackers for the criteria ---
     // Pitch & Rhythm
@@ -1121,95 +1121,140 @@ const pkg = {
     },
 
     // --- NEW: LATENCY CALIBRATION FUNCTION ---
-    // Broken as hell, not in use
     /**
-     * Performs an automatic audio latency test.
-     * Your UI should call this function and instruct the user to be quiet.
+     * Performs a sophisticated, automated audio latency test using pitch detection.
      * @returns {Promise<number>} The measured latency in seconds.
      */
     runLatencyTest: async () => {
-      if (!audioContext || !state.scoring.micAnalyser) {
-        console.error(
-          "[FORTE SVC] Cannot run latency test: audio context or mic not ready.",
-        );
-        return state.scoring.measuredLatencyS;
+      if (
+        !audioContext ||
+        !state.scoring.micAnalyser ||
+        !state.scoring.pitchDetector
+      ) {
+        throw new Error("Audio context or mic not ready for test.");
       }
+      console.log("[FORTE SVC] Starting latency calibration test...");
 
-      console.log("[FORTE SVC] Starting latency test...");
+      // Constants for the test
+      const NTESTS = 8;
+      const TEST_INTERVAL_S = 0.5;
+      const TEST_TONE_DURATION_S = 0.1;
+      const TEST_FREQ_HZ = 880.0; // A5, easier to distinguish from noise
+      const TEST_PITCH_MIDI = 81; // MIDI note for A5
+      const WARMUP_S = 1.0;
+      const TIMEOUT_S = WARMUP_S + NTESTS * TEST_INTERVAL_S + 2.0;
 
       const analyser = state.scoring.micAnalyser;
+      const pitchDetector = state.scoring.pitchDetector;
       const buffer = new Float32Array(analyser.fftSize);
-      let timeoutId;
+      let animationFrameId;
 
       const testPromise = new Promise((resolve, reject) => {
-        let listening = false;
-        let startTime = 0;
+        let latencies = [];
+        let detectedBeeps = new Set(); // To avoid detecting the same beep multiple times
 
-        // Create a sharp test tone
+        // 1. Schedule test tones
         const osc = audioContext.createOscillator();
         const gain = audioContext.createGain();
-        osc.type = "sine";
-        osc.frequency.setValueAtTime(1000, audioContext.currentTime); // 1kHz tone
-        gain.gain.setValueAtTime(0, audioContext.currentTime);
-        osc.connect(gain).connect(masterGain);
+        osc.frequency.value = TEST_FREQ_HZ;
+        gain.gain.value = 0;
+        osc.connect(gain).connect(masterGain); // Connect to master gain to be audible
         osc.start();
 
-        const checkMic = () => {
-          if (!listening) {
-            requestAnimationFrame(checkMic);
-            return;
+        const baseTime = audioContext.currentTime + WARMUP_S;
+        for (let i = 0; i < NTESTS; i++) {
+          const toneStartTime = baseTime + i * TEST_INTERVAL_S;
+          gain.gain.setValueAtTime(1.0, toneStartTime);
+          gain.gain.setValueAtTime(0, toneStartTime + TEST_TONE_DURATION_S);
+        }
+
+        // 2. Start listening loop
+        const listenLoop = () => {
+          if (
+            audioContext.currentTime >
+            baseTime + NTESTS * TEST_INTERVAL_S + 1.0
+          ) {
+            return; // Stop requesting frames, test window is over
           }
+
           analyser.getFloatTimeDomainData(buffer);
-          const rms = Math.sqrt(
-            buffer.reduce((s, v) => s + v * v, 0) / buffer.length,
+          const [pitch, clarity] = pitchDetector.findPitch(
+            buffer,
+            audioContext.sampleRate,
           );
+          const detectedMidi = 12 * Math.log2(pitch / 440) + 69;
 
-          // Use a threshold to detect the tone's arrival
-          if (rms > 0.01) {
-            // This threshold may need tweaking
-            const latencyMs = performance.now() - startTime;
-            console.log(
-              `[FORTE SVC] Latency detected: ${latencyMs.toFixed(2)} ms`,
+          if (clarity > 0.9 && Math.abs(detectedMidi - TEST_PITCH_MIDI) < 1.0) {
+            const inputTime = audioContext.currentTime;
+            const timeSinceBase = inputTime - baseTime;
+            const closestBeepIndex = Math.floor(
+              timeSinceBase / TEST_INTERVAL_S,
             );
-            state.scoring.measuredLatencyS = latencyMs / 1000;
-            osc.stop();
-            gain.disconnect();
-            clearTimeout(timeoutId);
-            resolve(state.scoring.measuredLatencyS);
-          } else {
-            requestAnimationFrame(checkMic);
+
+            if (
+              closestBeepIndex >= 0 &&
+              closestBeepIndex < NTESTS &&
+              !detectedBeeps.has(closestBeepIndex)
+            ) {
+              const scheduledTime =
+                baseTime + closestBeepIndex * TEST_INTERVAL_S;
+              const latency = inputTime - scheduledTime;
+
+              if (latency > 0.01 && latency < 0.5) {
+                // Sanity check
+                latencies.push(latency);
+                detectedBeeps.add(closestBeepIndex);
+              }
+            }
           }
+          animationFrameId = requestAnimationFrame(listenLoop);
         };
+        animationFrameId = requestAnimationFrame(listenLoop);
 
-        // Start listening, then play the tone
-        listening = true;
-        checkMic();
-
-        startTime = performance.now();
-        gain.gain.linearRampToValueAtTime(1.0, audioContext.currentTime + 0.01);
-        gain.gain.linearRampToValueAtTime(0.0, audioContext.currentTime + 0.06);
-
-        timeoutId = setTimeout(() => {
-          listening = false;
+        // 3. Set a timeout to end the test and analyze results
+        setTimeout(() => {
+          cancelAnimationFrame(animationFrameId);
           osc.stop();
           gain.disconnect();
-          reject(new Error("Latency test timed out. No sound detected."));
-        }, 2000); // 5-second timeout
+          osc.disconnect();
+
+          if (latencies.length < NTESTS / 2) {
+            reject(
+              new Error(
+                `Calibration failed: Only detected ${latencies.length}/${NTESTS} beeps. Check mic/speaker volume.`,
+              ),
+            );
+            return;
+          }
+
+          const mean = latencies.reduce((a, b) => a + b) / latencies.length;
+          const std = Math.sqrt(
+            latencies
+              .map((x) => Math.pow(x - mean, 2))
+              .reduce((a, b) => a + b) / latencies.length,
+          );
+
+          console.log(
+            `[FORTE SVC] Calibration results: Mean=${(mean * 1000).toFixed(
+              2,
+            )}ms, StdDev=${(std * 1000).toFixed(2)}ms`,
+          );
+
+          if (std > 0.05) {
+            reject(
+              new Error(
+                `Calibration failed: Inconsistent results (StdDev > 50ms). Try reducing background noise.`,
+              ),
+            );
+            return;
+          }
+
+          state.scoring.measuredLatencyS = mean;
+          resolve(mean);
+        }, TIMEOUT_S * 1000);
       });
 
-      try {
-        return await testPromise;
-      } catch (e) {
-        console.warn(`[FORTE SVC] ${e.message}. Using fallback latency.`);
-        // Use the browser's estimated output latency if available, otherwise use the sensible default.
-        state.scoring.measuredLatencyS = audioContext.baseLatency || 0.05;
-        console.warn(
-          `[FORTE SVC] Fallback latency set to ${state.scoring.measuredLatencyS.toFixed(
-            3,
-          )}s (baseLatency: ${audioContext.baseLatency || "N/A"})`,
-        );
-        return state.scoring.measuredLatencyS; // Return fallback value
-      }
+      return await testPromise;
     },
 
     getMicDevices: async () => {

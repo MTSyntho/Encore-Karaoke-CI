@@ -559,6 +559,13 @@ const pkg = {
     InfoBar.init(wrapper, maxLength);
     ScoreHUD.init(wrapper);
 
+    // --- REVISION: Create a persistent, reusable calibration screen ---
+    const calibrationScreen = new Html("div")
+      .class("calibration-screen")
+      .appendTo(wrapper);
+    const calibrationTitle = new Html("h1").appendTo(calibrationScreen);
+    const calibrationText = new Html("p").appendTo(calibrationScreen);
+
     new Html("style")
       .text(
         `
@@ -741,6 +748,11 @@ const pkg = {
         .gauge-vibrato { --gauge-color: #22c55e; }
         .gauge-upband { --gauge-color: #f59e0b; }
         .gauge-downband { --gauge-color: #ef4444; }
+        /* --- REVISION: Added styles for new calibration screen --- */
+        .calibration-screen { position: absolute; inset: 0; background: rgba(0,0,0,0.9); display: flex; align-items: center; justify-content: center; flex-direction: column; color: white; font-family: 'Rajdhani', sans-serif; z-index: 999999; opacity: 0; transition: opacity 0.5s ease; pointer-events: none; text-align: center; padding: 2rem; }
+        .calibration-screen.visible { opacity: 1; pointer-events: all; }
+        .calibration-screen h1 { font-size: 3rem; letter-spacing: 0.1em; color: #89CFF0; margin-bottom: 1rem; }
+        .calibration-screen p { font-size: 1.5rem; opacity: 0.8; max-width: 60ch; }
     `,
       )
       .appendTo(wrapper);
@@ -761,7 +773,7 @@ const pkg = {
     const songArtist = new Html("p").class("song-artist").appendTo(songInfo);
     new Html("p")
       .class("search-hint")
-      .text("Press 'Y' to Search YouTube")
+      .html("Press 'Y' to Search YouTube<br>Press 'C' to Calibrate Audio")
       .appendTo(mainContent);
     new Html("h2").text("Song List").appendTo(rightPanel);
     const songListContainer = new Html("div")
@@ -930,31 +942,44 @@ const pkg = {
       state.isTransitioning = false;
     }
 
-    const calibrationScreen = new Html("div")
-      .styleJs({
-        position: "absolute",
-        inset: 0,
-        background: "rgba(0,0,0,0.9)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        flexDirection: "column",
-        color: "white",
-        fontFamily: "'Rajdhani', sans-serif",
-        zIndex: 999999,
-        opacity: 0,
-        transition: "opacity 0.5s ease",
-        pointerEvents: "none",
-      })
-      .appendTo(wrapper);
-    new Html("h1")
-      .styleJs({ fontSize: "3rem", letterSpacing: "0.1em", color: "#89CFF0" })
-      .text("CALIBRATING AUDIO")
-      .appendTo(calibrationScreen);
-    new Html("p")
-      .styleJs({ fontSize: "1.5rem", opacity: 0.8 })
-      .text("Please be quiet...")
-      .appendTo(calibrationScreen);
+    // --- REVISION: New function to manage the calibration UI flow ---
+    async function runCalibrationSequence() {
+      if (state.isTransitioning) return;
+      state.isTransitioning = true;
+
+      calibrationTitle.text("AUDIO CALIBRATION");
+      calibrationText.html(
+        "Please place your microphone near your speakers and ensure the room is quiet.<br>The test will begin in a few seconds...",
+      );
+      calibrationScreen.classOn("visible");
+
+      await new Promise((r) => setTimeout(r, 5000)); // Give user time to prepare
+
+      calibrationText.text("Calibrating... A series of beeps will play.");
+
+      try {
+        const latencyS = await Forte.runLatencyTest();
+        const latencyMs = (latencyS * 1000).toFixed(0);
+        calibrationTitle.text("CALIBRATION COMPLETE");
+        calibrationText.text(`Measured audio latency is ${latencyMs} ms.`);
+        InfoBar.show("CALIBRATION", `Success! Latency: ${latencyMs} ms`, {
+          duration: 5000,
+        });
+      } catch (e) {
+        console.error("[Encore] Calibration failed:", e);
+        calibrationTitle.text("CALIBRATION FAILED");
+        calibrationText.html(
+          `Could not get a reliable measurement.<br>Please check your microphone input, speaker volume, and reduce background noise.`,
+        );
+        InfoBar.show("CALIBRATION", "Failed. Please try again.", {
+          duration: 5000,
+        });
+      }
+
+      await new Promise((r) => setTimeout(r, 6000)); // Show results for 6 seconds
+      calibrationScreen.classOff("visible");
+      state.isTransitioning = false;
+    }
 
     const toggleSearchOverlay = (visible) => {
       if (visible) {
@@ -1830,6 +1855,10 @@ const pkg = {
         if (state.mode === "menu") setMode("yt-search");
         else if (state.mode === "player")
           toggleSearchOverlay(!state.isSearchOverlayVisible);
+      } else if (e.key.toLowerCase() === "c") {
+        if (state.mode === "menu") {
+          runCalibrationSequence();
+        }
       }
     };
 
@@ -1929,7 +1958,6 @@ const pkg = {
 
     wrapper.classOn("loading");
     await new Promise((r) => setTimeout(r, 500));
-    calibrationScreen.cleanup();
     await BGVPlayer.init(bgvContainer);
     await BGVPlayer.loadManifestCategories();
     const mtvPaths = songList
