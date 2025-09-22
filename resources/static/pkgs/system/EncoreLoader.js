@@ -11,15 +11,12 @@ const pkg = {
 
   // Add the loading sequence function
   async startLoadingSequence() {
-    let forte = root.Processes.getService("ForteSvc").data;
     let fsSvc = root.Processes.getService("FsSvc").data;
-    statusP.text("Loading Forte Sound Engine...");
 
     try {
       const config = await window.desktopIntegration.ipc.invoke("getConfig");
       console.log(config);
       if (!config.setupComplete) {
-        await forte.playTrack();
         await root.Libs.startPkg("system:EncoreSetup", []);
         this.end();
       } else {
@@ -28,6 +25,9 @@ const pkg = {
           statusP.text(
             `Loading library...\n${e.detail.current}/${e.detail.total} (${e.detail.percentage}%)`,
           );
+        });
+        document.addEventListener("CherryTree.Loading.SetText", (e) => {
+          statusP.text(e.detail);
         });
         fsSvc.buildSongList(config.libraryPath);
         document.addEventListener(
@@ -41,7 +41,6 @@ const pkg = {
     } catch (error) {
       // Assume config is corrupted
       console.error("Failed to load config:", error);
-      await forte.playTrack();
       await root.Libs.startPkg("system:EncoreSetup", []);
       this.end();
     }

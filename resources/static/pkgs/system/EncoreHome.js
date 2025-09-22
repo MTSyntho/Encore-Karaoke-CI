@@ -1957,7 +1957,12 @@ const pkg = {
     window.addEventListener("keydown", keydownHandler);
 
     wrapper.classOn("loading");
-    await new Promise((r) => setTimeout(r, 500));
+    // await new Promise((r) => setTimeout(r, 500));
+    document.dispatchEvent(
+      new CustomEvent("CherryTree.Loading.SetText", {
+        detail: "Loading BGVs...",
+      }),
+    );
     await BGVPlayer.init(bgvContainer);
     await BGVPlayer.loadManifestCategories();
     const mtvPaths = songList
