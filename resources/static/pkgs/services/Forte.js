@@ -128,7 +128,7 @@ const state = {
     connectedMics: 0,
   },
   ui: {
-    pianoRollVisible: false,
+    pianoRollVisible: true,
   },
 };
 
@@ -155,11 +155,11 @@ let guideAnalyserBuffer = null;
 let micAnalyserBuffer = null;
 
 // --- NEW SCORING CONSTANTS ---
-const GUIDE_CLARITY_THRESHOLD = 0.7;
-const MIC_CLARITY_THRESHOLD = 0.7;
+const GUIDE_CLARITY_THRESHOLD = 0.5;
+const MIC_CLARITY_THRESHOLD = 0.85;
 const PITCH_HISTORY_LENGTH = 60;
 const VIBRATO_HOLD_DURATION_MS = 200;
-const VIBRATO_STD_DEV_MIN = 0.8;
+const VIBRATO_STD_DEV_MIN = 0.4;
 const VIBRATO_STD_DEV_MAX = 8.0;
 const TRANSITION_ANALYSIS_WINDOW_MS = 100;
 
@@ -222,7 +222,7 @@ function updateScore() {
 
   // --- 2. GUIDE NOTE STATE MACHINE & OPPORTUNITY TRACKING ---
   const wasGuideNoteActive = state.scoring.isVocalGuideNoteActive;
-  const isGuideNoteActive = guideClarity > GUIDE_CLARITY_THRESHOLD;
+  const isGuideNoteActive = guideClarity >= GUIDE_CLARITY_THRESHOLD;
   state.scoring.isVocalGuideNoteActive = isGuideNoteActive;
 
   // Rising edge: A new guide note has just started.
@@ -310,7 +310,7 @@ function updateScore() {
           state.scoring.upbandsHit++;
           state.scoring.hasScoredCurrentTransition = true;
           // --- Added for Score Reasons ---
-          showScoreReason("UPBAND!", "transition");
+          // showScoreReason("UPBAND!", "transition");
           state.scoring.hasScoredCurrentNoteStyle = true;
         }
         // Downband hit
@@ -321,7 +321,7 @@ function updateScore() {
           state.scoring.downbandsHit++;
           state.scoring.hasScoredCurrentTransition = true;
           // --- Added for Score Reasons ---
-          showScoreReason("DOWNBAND!", "transition");
+          // showScoreReason("DOWNBAND!", "transition");
           state.scoring.hasScoredCurrentNoteStyle = true;
         }
       }
@@ -546,6 +546,11 @@ function startIncrementalGuideAnalysis(audioBuffer) {
   const analysisChunkDurationS = 2; // Process 2 seconds of audio at a time
   const analysisChunkSamples = analysisChunkDurationS * sampleRate;
 
+  // --- FIX START: Persist currentNote across chunks ---
+  // This variable holds the note being tracked. It MUST be outside `processChunk`
+  // so that its state is remembered between processing intervals.
+  let currentNote = null;
+
   function processChunk() {
     if (!state.playback.isAnalyzing) {
       console.log("[FORTE SVC] Incremental analysis stopped.");
@@ -556,7 +561,7 @@ function startIncrementalGuideAnalysis(audioBuffer) {
       analysisPosition + analysisChunkSamples,
       channelData.length - chunkSize,
     );
-    let currentNote = null;
+    // REMOVED: `let currentNote = null;` was here, which caused the bug.
     const foundNotes = [];
 
     for (let i = analysisPosition; i < chunkEndPosition; i += stepSize) {
@@ -627,6 +632,24 @@ function startIncrementalGuideAnalysis(audioBuffer) {
     if (analysisPosition < channelData.length - chunkSize) {
       setTimeout(processChunk, 10); // Yield to main thread
     } else {
+      if (currentNote) {
+        const time = (channelData.length - 1) / sampleRate;
+        const duration = time - currentNote.startTime;
+        if (duration > minNoteDuration) {
+          const avgPitch =
+            currentNote.pitches.reduce((a, b) => a + b, 0) /
+            currentNote.pitches.length;
+          const finalNote = {
+            id: noteIdCounter++,
+            pitch: avgPitch,
+            startTime: currentNote.startTime,
+            duration: duration,
+          };
+          state.playback.guideNotes.push(finalNote);
+          renderPianoRollNotes([finalNote]); // Render this last note
+        }
+      }
+      // --- FIX END ---
       state.playback.isAnalyzing = false;
       console.log("[FORTE SVC] Incremental analysis complete.");
     }
@@ -1224,8 +1247,9 @@ const pkg = {
           if (state.playback.guideNotes) {
             pianoRollTrack.clear(); // Clear any previous notes
             renderPianoRollNotes(state.playback.guideNotes); // Re-render existing notes
-            pianoRollContainer.classOn("visible");
-            state.ui.pianoRollVisible = true;
+            if (state.ui.pianoRollVisible) {
+              pianoRollContainer.classOn("visible");
+            }
           }
           // --- END: Added for Piano Roll ---
           // --- START: SCORING ENGINE ---
