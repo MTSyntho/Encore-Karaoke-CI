@@ -31,6 +31,15 @@ let root;
 let toastElement = null;
 let toastStyleElement = null;
 let toastTimeout = null;
+// --- START: Added for Piano Roll ---
+let pianoRollContainer = null;
+let pianoRollTrack = null;
+let pianoRollPlayhead = null;
+let pianoRollUserPitch = null;
+let lastHitNoteElement = null; // To track the currently highlighted note
+let scoreReasonDisplay = null; // --- Added for Score Reasons ---
+let scoreReasonTimeout = null; // --- Added for Score Reasons ---
+// --- END: Added for Piano Roll ---
 
 // --- Web Audio API State for Karaoke Track Playback ---
 let audioContext;
@@ -81,6 +90,7 @@ const state = {
     downbandsHit: 0,
     lastGuidePitch: 0,
     hasScoredCurrentTransition: false,
+    hasScoredCurrentNoteStyle: false, // --- Added for Score Reasons ---
 
     // Real-time state
     pitchHistory: [],
@@ -101,6 +111,8 @@ const state = {
     isMidi: false,
     isMultiplexed: false,
     decodedLyrics: [],
+    guideNotes: [], // --- Changed for Piano Roll ---
+    isAnalyzing: false, // --- Added for Piano Roll ---
     startTime: 0,
     pauseTime: 0,
     devices: [],
@@ -114,6 +126,9 @@ const state = {
   mic: {
     peerId: null,
     connectedMics: 0,
+  },
+  ui: {
+    pianoRollVisible: false,
   },
 };
 
@@ -140,13 +155,28 @@ let guideAnalyserBuffer = null;
 let micAnalyserBuffer = null;
 
 // --- NEW SCORING CONSTANTS ---
-const GUIDE_CLARITY_THRESHOLD = 0.9;
-const MIC_CLARITY_THRESHOLD = 0.85;
+const GUIDE_CLARITY_THRESHOLD = 0.7;
+const MIC_CLARITY_THRESHOLD = 0.7;
 const PITCH_HISTORY_LENGTH = 60;
-const VIBRATO_HOLD_DURATION_MS = 400;
+const VIBRATO_HOLD_DURATION_MS = 200;
 const VIBRATO_STD_DEV_MIN = 0.8;
-const VIBRATO_STD_DEV_MAX = 4.0;
+const VIBRATO_STD_DEV_MAX = 8.0;
 const TRANSITION_ANALYSIS_WINDOW_MS = 100;
+
+// --- Added for Score Reasons ---
+function showScoreReason(text, type = "pitch") {
+  if (scoreReasonTimeout) clearTimeout(scoreReasonTimeout);
+  if (!state.ui.pianoRollVisible) return;
+  scoreReasonDisplay
+    .classOff("type-pitch", "type-vibrato", "type-transition")
+    .classOn(`type-${type}`)
+    .text(text)
+    .classOn("visible");
+
+  scoreReasonTimeout = setTimeout(() => {
+    scoreReasonDisplay.classOff("visible");
+  }, 1200);
+}
 
 /**
  * Calculates a multi-faceted score based on pitch, rhythm, vibrato, and transitions.
@@ -200,6 +230,7 @@ function updateScore() {
     state.scoring.totalScorableNotes++;
     state.scoring.hasHitCurrentNote = false;
     state.scoring.hasScoredCurrentTransition = false;
+    state.scoring.hasScoredCurrentNoteStyle = false; // --- Added for Score Reasons ---
 
     // Transition opportunity detection
     if (state.scoring.lastGuidePitch > 0) {
@@ -234,7 +265,8 @@ function updateScore() {
     while (normalizedMicPitch < guidePitch * 0.75) normalizedMicPitch *= 2;
     while (normalizedMicPitch > guidePitch * 1.5) normalizedMicPitch /= 2;
     const centsDifference = 1200 * Math.log2(normalizedMicPitch / guidePitch);
-    if (Math.abs(centsDifference) < 50) isCorrectPitch = true;
+    // REVISION: Make pitch detection more sensitive
+    if (Math.abs(centsDifference) < 35) isCorrectPitch = true;
   }
 
   if (isCorrectPitch) {
@@ -247,6 +279,10 @@ function updateScore() {
       // First time hitting this note
       state.scoring.notesHit++;
       state.scoring.hasHitCurrentNote = true;
+      // --- Added for Score Reasons ---
+      if (!state.scoring.hasScoredCurrentNoteStyle) {
+        showScoreReason("PERFECT", "pitch");
+      }
     }
 
     // Transition Scoring (only happens once at the start of a note)
@@ -273,6 +309,9 @@ function updateScore() {
         ) {
           state.scoring.upbandsHit++;
           state.scoring.hasScoredCurrentTransition = true;
+          // --- Added for Score Reasons ---
+          showScoreReason("UPBAND!", "transition");
+          state.scoring.hasScoredCurrentNoteStyle = true;
         }
         // Downband hit
         else if (
@@ -281,6 +320,9 @@ function updateScore() {
         ) {
           state.scoring.downbandsHit++;
           state.scoring.hasScoredCurrentTransition = true;
+          // --- Added for Score Reasons ---
+          showScoreReason("DOWNBAND!", "transition");
+          state.scoring.hasScoredCurrentNoteStyle = true;
         }
       }
     }
@@ -304,6 +346,11 @@ function updateScore() {
           // Credit opportunity here and stop checking for this note
           state.scoring.vibratoOpportunities++;
           state.scoring.isHoldingNote = false; // Prevents re-triggering
+          // --- Added for Score Reasons ---
+          if (!state.scoring.hasScoredCurrentNoteStyle) {
+            showScoreReason("VIBRATO!", "vibrato");
+            state.scoring.hasScoredCurrentNoteStyle = true;
+          }
         }
       }
     }
@@ -318,6 +365,57 @@ function updateScore() {
     }
     state.scoring.isHoldingNote = false;
   }
+
+  // --- START: Added for Piano Roll ---
+  if (
+    pianoRollContainer &&
+    pianoRollContainer.elm.classList.contains("visible")
+  ) {
+    const pitchToY = (pitch) => {
+      const minMidi = 48; // C3
+      const maxMidi = 84; // C6
+      const rollHeight = 150; // In pixels, from CSS
+      if (!isFinite(pitch) || pitch < minMidi) return rollHeight;
+      if (pitch > maxMidi) return 0;
+      const pitchRange = maxMidi - minMidi;
+      const normalizedPitch = (pitch - minMidi) / pitchRange;
+      return rollHeight - normalizedPitch * rollHeight;
+    };
+
+    // Update user pitch trace
+    const midiMicPitch = 12 * Math.log2(micPitch / 440) + 69;
+    if (micClarity > MIC_CLARITY_THRESHOLD && midiMicPitch > 0) {
+      pianoRollUserPitch.styleJs({
+        top: `${pitchToY(midiMicPitch) - 2}px`,
+        opacity: "1",
+      });
+    } else {
+      pianoRollUserPitch.styleJs({ opacity: "0" });
+    }
+
+    // Update note highlighting
+    const currentTime = pkg.data.getPlaybackState().currentTime;
+    const notes = state.playback.guideNotes;
+    if (notes) {
+      if (lastHitNoteElement) {
+        lastHitNoteElement.classOff("hit");
+        lastHitNoteElement = null;
+      }
+
+      const currentNote = notes.find(
+        (n) =>
+          currentTime >= n.startTime && currentTime < n.startTime + n.duration,
+      );
+      if (currentNote && isCorrectPitch) {
+        const noteEl = pianoRollTrack.qs(`#forte-note-${currentNote.id}`);
+        if (noteEl) {
+          noteEl.classOn("hit");
+          lastHitNoteElement = noteEl;
+        }
+      }
+    }
+  }
+  // --- END: Added for Piano Roll ---
 
   // --- 4. FINAL SCORE COMPOSITION ---
   const s = state.scoring;
@@ -374,6 +472,18 @@ function timingLoop() {
     }),
   );
 
+  // --- START: Added for Piano Roll ---
+  if (
+    pianoRollContainer &&
+    pianoRollContainer.elm.classList.contains("visible")
+  ) {
+    const PIXELS_PER_SECOND = 150; // Adjust for desired scroll speed
+    pianoRollTrack.styleJs({
+      transform: `translateX(-${currentTime * PIXELS_PER_SECOND}px)`,
+    });
+  }
+  // --- END: Added for Piano Roll ---
+
   if (state.scoring.enabled) {
     updateScore();
   }
@@ -384,6 +494,147 @@ function timingLoop() {
   }
   animationFrameId = requestAnimationFrame(timingLoop);
 }
+
+// --- START: Added for Piano Roll ---
+/**
+ * Renders a batch of notes to the piano roll track.
+ * @param {Array<{id: number, pitch: number, startTime: number, duration: number}>} notes An array of note objects.
+ */
+function renderPianoRollNotes(notes) {
+  if (!pianoRollTrack) return;
+  const PIXELS_PER_SECOND = 150;
+  const pitchToY = (pitch) => {
+    const minMidi = 48; // C3
+    const maxMidi = 84; // C6
+    const rollHeight = 150; // In pixels, from CSS
+    if (pitch < minMidi) return rollHeight;
+    if (pitch > maxMidi) return 0;
+    const pitchRange = maxMidi - minMidi;
+    const normalizedPitch = (pitch - minMidi) / pitchRange;
+    return rollHeight - normalizedPitch * rollHeight;
+  };
+
+  for (const note of notes) {
+    new Html("div")
+      .class("forte-piano-note")
+      .id(`forte-note-${note.id}`)
+      .styleJs({
+        left: `${note.startTime * PIXELS_PER_SECOND}px`,
+        width: `${note.duration * PIXELS_PER_SECOND}px`,
+        top: `${pitchToY(note.pitch)}px`,
+      })
+      .appendTo(pianoRollTrack);
+  }
+}
+
+/**
+ * Starts a non-blocking, incremental analysis of the guide vocal track.
+ * @param {AudioBuffer} audioBuffer The decoded audio buffer.
+ */
+function startIncrementalGuideAnalysis(audioBuffer) {
+  console.log("[FORTE SVC] Starting incremental analysis for piano roll...");
+  state.playback.isAnalyzing = true;
+  const channelData = audioBuffer.getChannelData(1);
+  const sampleRate = audioBuffer.sampleRate;
+  const detector = PitchDetector.forFloat32Array(2048);
+  const minNoteDuration = 0.08;
+  const chunkSize = 2048;
+  const stepSize = 512;
+  let noteIdCounter = state.playback.guideNotes.length;
+
+  let analysisPosition = 0;
+  const analysisChunkDurationS = 2; // Process 2 seconds of audio at a time
+  const analysisChunkSamples = analysisChunkDurationS * sampleRate;
+
+  function processChunk() {
+    if (!state.playback.isAnalyzing) {
+      console.log("[FORTE SVC] Incremental analysis stopped.");
+      return;
+    }
+
+    const chunkEndPosition = Math.min(
+      analysisPosition + analysisChunkSamples,
+      channelData.length - chunkSize,
+    );
+    let currentNote = null;
+    const foundNotes = [];
+
+    for (let i = analysisPosition; i < chunkEndPosition; i += stepSize) {
+      const chunk = channelData.slice(i, i + chunkSize);
+      const [pitch, clarity] = detector.findPitch(chunk, sampleRate);
+      const time = i / sampleRate;
+      const midiPitch = 12 * Math.log2(pitch / 440) + 69;
+      const isNoteActive =
+        clarity > GUIDE_CLARITY_THRESHOLD && pitch > 50 && isFinite(midiPitch);
+
+      if (isNoteActive) {
+        if (!currentNote) {
+          currentNote = {
+            midi: midiPitch,
+            startTime: time,
+            pitches: [midiPitch],
+          };
+        } else {
+          currentNote.pitches.push(midiPitch);
+        }
+      } else if (currentNote) {
+        const duration = time - currentNote.startTime;
+        if (duration > minNoteDuration) {
+          const avgPitch =
+            currentNote.pitches.reduce((a, b) => a + b, 0) /
+            currentNote.pitches.length;
+          foundNotes.push({
+            id: noteIdCounter++,
+            pitch: avgPitch,
+            startTime: currentNote.startTime,
+            duration: duration,
+          });
+        }
+        currentNote = null;
+      }
+    }
+
+    // Post-process and render the notes found in this chunk
+    if (foundNotes.length > 0) {
+      // Simple merge logic for notes spanning chunks
+      const lastGlobalNote =
+        state.playback.guideNotes[state.playback.guideNotes.length - 1];
+      const firstChunkNote = foundNotes[0];
+      if (
+        lastGlobalNote &&
+        firstChunkNote.startTime -
+          (lastGlobalNote.startTime + lastGlobalNote.duration) <
+          0.05 &&
+        Math.abs(firstChunkNote.pitch - lastGlobalNote.pitch) < 1.0
+      ) {
+        lastGlobalNote.duration =
+          firstChunkNote.startTime +
+          firstChunkNote.duration -
+          lastGlobalNote.startTime;
+        const noteEl = pianoRollTrack.qs(`#forte-note-${lastGlobalNote.id}`);
+        if (noteEl)
+          noteEl.styleJs({
+            width: `${lastGlobalNote.duration * 150}px`,
+          });
+        foundNotes.shift();
+      }
+
+      state.playback.guideNotes.push(...foundNotes);
+      renderPianoRollNotes(foundNotes);
+    }
+
+    analysisPosition = chunkEndPosition;
+    if (analysisPosition < channelData.length - chunkSize) {
+      setTimeout(processChunk, 10); // Yield to main thread
+    } else {
+      state.playback.isAnalyzing = false;
+      console.log("[FORTE SVC] Incremental analysis complete.");
+    }
+  }
+
+  setTimeout(processChunk, 10); // Start the process
+}
+// --- END: Added for Piano Roll ---
 
 const pkg = {
   name: "Forte Sound Engine Service",
@@ -421,10 +672,124 @@ const pkg = {
             opacity: 1;
             transform: translateX(0);
         }
+        /* --- START: Added for Piano Roll --- */
+        .forte-piano-roll-container {
+            position: fixed;
+            /* REVISION: Repositioned to be higher */
+            bottom: 65%;
+            left: 0;
+            width: 100%;
+            height: 150px;
+            background: rgba(0, 0, 0, 0.4);
+            border-top: 1px solid rgba(255, 255, 255, 0.15);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+            overflow: hidden;
+            z-index: 14; /* Below player UI but above BGV */
+            opacity: 0;
+            transition: opacity 0.5s ease;
+            pointer-events: none;
+        }
+        .forte-piano-roll-container.visible {
+            opacity: 1;
+        }
+        .forte-piano-roll-playhead {
+            position: absolute;
+            left: 50%;
+            top: 0;
+            bottom: 0;
+            width: 3px;
+            background: #FFD700;
+            box-shadow: 0 0 10px #FFD700;
+            transform: translateX(-50%);
+            z-index: 3;
+        }
+        .forte-piano-roll-track {
+            position: absolute;
+            top: 0;
+            left: 50%; /* Start notes scrolling from the center */
+            height: 100%;
+            will-change: transform;
+            z-index: 1;
+        }
+        .forte-piano-note {
+            position: absolute;
+            height: 8px;
+            background-color: #89CFF0; /* Encore theme blue */
+            border-radius: 4px;
+            border: 1px solid rgba(1,1,65,0.8);
+            box-sizing: border-box;
+            transition: background-color 0.1s linear;
+            transform: translateY(-50%); /* Center vertically on pitch line */
+        }
+        .forte-piano-note.hit {
+            background-color: #39FF14; /* Neon green for hit */
+            box-shadow: 0 0 8px #39FF14;
+        }
+        .forte-piano-roll-user-pitch {
+            position: absolute;
+            left: 45%;
+            width: 10%;
+            height: 4px;
+            background: #f7b733; /* Orange from countdown timer */
+            border-radius: 2px;
+            box-shadow: 0 0 8px #f7b733;
+            z-index: 2;
+            opacity: 0;
+            transition: top 0.05s linear, opacity 0.1s linear;
+            transform: translateY(-50%);
+        }
+        /* --- END: Added for Piano Roll --- */
+        /* --- START: Added for Score Reasons --- */
+        .forte-score-reason {
+            position: fixed;
+            /* REVISION: Repositioned above new piano roll location */
+            bottom: calc(65% + 150px);
+            left: 50%;
+            transform: translate(-50%, 20px); /* Start slightly lower */
+            font-family: 'Rajdhani', sans-serif;
+            font-size: 2.5rem;
+            font-weight: 900;
+            letter-spacing: 0.1em;
+            text-shadow: 2px 2px 8px rgba(0,0,0,0.8);
+            -webkit-text-stroke: 1px #000;
+            paint-order: stroke fill;
+            z-index: 20;
+            opacity: 0;
+            transition: opacity 0.3s ease, transform 0.3s ease;
+            pointer-events: none;
+        }
+        .forte-score-reason.visible {
+            opacity: 1;
+            transform: translate(-50%, 0); /* Animate upwards to final spot */
+        }
+        .forte-score-reason.type-pitch { color: #89CFF0; }
+        .forte-score-reason.type-vibrato { color: #22c55e; }
+        .forte-score-reason.type-transition { color: #f59e0b; }
+        /* --- END: Added for Score Reasons --- */
     `,
       )
       .appendTo("head");
     toastElement = new Html("div").classOn("forte-toast").appendTo("body");
+
+    // --- START: Added for Piano Roll ---
+    pianoRollContainer = new Html("div")
+      .classOn("forte-piano-roll-container")
+      .appendTo("body");
+    pianoRollTrack = new Html("div")
+      .classOn("forte-piano-roll-track")
+      .appendTo(pianoRollContainer);
+    pianoRollPlayhead = new Html("div")
+      .classOn("forte-piano-roll-playhead")
+      .appendTo(pianoRollContainer);
+    pianoRollUserPitch = new Html("div")
+      .classOn("forte-piano-roll-user-pitch")
+      .appendTo(pianoRollContainer);
+    // --- END: Added for Piano Roll ---
+    // --- START: Added for Score Reasons ---
+    scoreReasonDisplay = new Html("div")
+      .classOn("forte-score-reason")
+      .appendTo("body");
+    // --- END: Added for Score Reasons ---
 
     try {
       audioContext = new (window.AudioContext || window.webkitAudioContext)({
@@ -682,6 +1047,17 @@ const pkg = {
       }
     },
 
+    togglePianoRollVisibility: async (bool) => {
+      state.ui.pianoRollVisible = bool;
+      if (bool) {
+        if (pianoRollContainer) pianoRollContainer.classOn("visible");
+        if (scoreReasonDisplay) scoreReasonDisplay.classOn("visible");
+      } else {
+        if (pianoRollContainer) pianoRollContainer.classOff("visible");
+        if (scoreReasonDisplay) scoreReasonDisplay.classOff("visible");
+      }
+    },
+
     loadSoundFont: async (url) => {
       if (!state.playback.synthesizer) {
         console.error(
@@ -713,6 +1089,8 @@ const pkg = {
       state.playback.transpose = 0;
       state.playback.isMultiplexed = false;
       state.playback.multiplexPan = -1; // Default pan to left (instrumental)
+      state.playback.guideNotes = []; // --- Changed for Piano Roll ---
+      state.playback.isAnalyzing = false; // --- Added for Piano Roll ---
 
       const isMidi =
         url.toLowerCase().endsWith(".mid") ||
@@ -787,6 +1165,12 @@ const pkg = {
           state.playback.buffer = await audioContext.decodeAudioData(
             arrayBuffer,
           );
+          // --- START: Changed for Piano Roll ---
+          if (state.playback.isMultiplexed) {
+            // Don't await. Let it run in the background.
+            startIncrementalGuideAnalysis(state.playback.buffer);
+          }
+          // --- END: Changed for Piano Roll ---
         }
 
         state.playback.status = "stopped";
@@ -836,6 +1220,14 @@ const pkg = {
         sourceNode.playbackRate.value = rate;
 
         if (state.playback.isMultiplexed) {
+          // --- START: Added for Piano Roll ---
+          if (state.playback.guideNotes) {
+            pianoRollTrack.clear(); // Clear any previous notes
+            renderPianoRollNotes(state.playback.guideNotes); // Re-render existing notes
+            pianoRollContainer.classOn("visible");
+            state.ui.pianoRollVisible = true;
+          }
+          // --- END: Added for Piano Roll ---
           // --- START: SCORING ENGINE ---
           // Reset all scoring variables to their initial state for a new song
           state.scoring.enabled = true;
@@ -868,7 +1260,7 @@ const pkg = {
           // --- DYNAMIC LATENCY COMPENSATION ---
           const delayNode = audioContext.createDelay();
           // Use the automatically measured latency + a small base offset
-          delayNode.delayTime.value = state.scoring.measuredLatencyS + 0.1;
+          delayNode.delayTime.value = state.scoring.measuredLatencyS;
           state.scoring.guideVocalDelayNode = delayNode;
           console.log(
             `[FORTE SVC] Applying total guide delay of ${delayNode.delayTime.value.toFixed(
@@ -936,6 +1328,9 @@ const pkg = {
         state.scoring.vocalGuideAnalyser.disconnect();
         state.scoring.vocalGuideAnalyser = null;
       }
+      // --- START: Added for Piano Roll ---
+      pianoRollContainer.classOff("visible");
+      // --- END: Added for Piano Roll ---
 
       if (state.playback.isMidi) {
         state.playback.sequencer.pause();
@@ -969,6 +1364,20 @@ const pkg = {
       }
 
       if (state.playback.status === "stopped") return;
+
+      // --- START: Added for Piano Roll ---
+      state.playback.isAnalyzing = false; // Stop any background analysis
+      if (pianoRollContainer) {
+        pianoRollContainer.classOff("visible");
+        pianoRollTrack.clear();
+        state.playback.guideNotes = [];
+        lastHitNoteElement = null;
+      }
+      // --- END: Added for Piano Roll ---
+      // --- START: Added for Score Reasons ---
+      if (scoreReasonTimeout) clearTimeout(scoreReasonTimeout);
+      scoreReasonDisplay.classOff("visible");
+      // --- END: Added for Score Reasons ---
 
       // Disable scoring and clean up analysis nodes
       state.scoring.enabled = false;
@@ -1257,6 +1666,15 @@ const pkg = {
       return await testPromise;
     },
 
+    setLatency: (latencySeconds) => {
+      if (typeof latencySeconds !== "number" || isNaN(latencySeconds)) return;
+      const clampedLatency = Math.max(0, Math.min(1, latencySeconds));
+      state.scoring.measuredLatencyS = clampedLatency;
+      console.log(
+        `[FORTE SVC] Audio latency set to ${clampedLatency * 1000} ms.`,
+      );
+    },
+
     getMicDevices: async () => {
       try {
         const devices = await navigator.mediaDevices.enumerateDevices();
@@ -1332,6 +1750,15 @@ const pkg = {
     toastElement = null;
     toastStyleElement = null;
     if (toastTimeout) clearTimeout(toastTimeout);
+    // --- START: Added for Piano Roll ---
+    if (pianoRollContainer) pianoRollContainer.cleanup();
+    if (scoreReasonDisplay) scoreReasonDisplay.cleanup(); // --- Added for Score Reasons ---
+    pianoRollContainer = null;
+    pianoRollTrack = null;
+    pianoRollPlayhead = null;
+    pianoRollUserPitch = null;
+    scoreReasonDisplay = null; // --- Added for Score Reasons ---
+    // --- END: Added for Piano Roll ---
 
     if (state.scoring.micStream) {
       // Stop mic track

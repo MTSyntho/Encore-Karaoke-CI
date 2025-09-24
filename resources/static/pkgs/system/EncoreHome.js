@@ -444,7 +444,7 @@ const pkg = {
     Ui.becomeTopUi(Pid, wrapper);
 
     console.log("[Encore] Preloading UI sound effects...");
-    const sfxToLoad = ["score_tally.wav"];
+    const sfxToLoad = ["fanfare.mp3", "fanfare-2.mp3"];
     for (let i = 0; i < 10; i++) {
       sfxToLoad.push(`numbers/${i}.wav`);
     }
@@ -489,6 +489,12 @@ const pkg = {
     });
 
     await Forte.setTrackVolume(config.audioConfig.mix.instrumental.volume);
+    if (config.audioConfig.micLatency) {
+      await Forte.setLatency(config.audioConfig.micLatency);
+    }
+    if (config.audioConfig.mix.scoring.inputDevice) {
+      await Forte.setMicDevice(config.audioConfig.mix.scoring.inputDevice);
+    }
 
     const bgvContainer = new Html("div")
       .class("bgv-container")
@@ -515,7 +521,7 @@ const pkg = {
       .appendTo(scoreCard);
     new Html("div")
       .class("score-header-title")
-      .text("PERFECT PITCH")
+      .text("YOUR SCORE")
       .appendTo(scoreHeader);
     new Html("div")
       .class("score-header-subtitle")
@@ -597,7 +603,7 @@ const pkg = {
         .search-ui {
             position: absolute;
             display: flex;
-            z-index: 20;
+            z-index: 20000000;
             opacity: 0;
             pointer-events: none;
             transition: opacity 0.3s ease-out;
@@ -613,6 +619,7 @@ const pkg = {
         .search-overlay-active .search-ui {
             opacity: 1;
             pointer-events: all;
+            z-index: 200000;
         }
 
         .mode-yt-search .search-ui {
@@ -622,6 +629,7 @@ const pkg = {
             background: rgba(0,0,0,0.6);
             backdrop-filter: blur(10px);
             align-items: center;
+            z-index: 2000000;
         }
         .mode-yt-search .search-window {
             width: 90%;
@@ -640,6 +648,7 @@ const pkg = {
             gap: 0;
             transition: height 0.25s ease-in-out, box-shadow 0.25s ease-in-out;
             overflow: hidden;
+            z-index: 2000000;
         }
         
         .search-overlay-active .search-window {
@@ -927,7 +936,7 @@ const pkg = {
         },
       );
       postSongScoreScreen.classOn("visible");
-      Forte.playSfx("/assets/audio/score_tally.wav");
+      Forte.playSfx("/assets/audio/fanfare.mp3");
       await new Promise((r) => setTimeout(r, 500));
       await animateNumber(finalScoreDisplay, scoreData.finalScore, 2000, true);
       await Promise.all([
@@ -936,7 +945,7 @@ const pkg = {
         animateGauge(upbandGauge, scoreData.details.upband, 1500),
         animateGauge(downbandGauge, scoreData.details.downband, 1500),
       ]);
-      await new Promise((r) => setTimeout(r, 4000));
+      await new Promise((r) => setTimeout(r, 7000));
       postSongScoreScreen.classOff("visible");
       await new Promise((r) => setTimeout(r, 500));
       state.isTransitioning = false;
@@ -947,9 +956,9 @@ const pkg = {
       if (state.isTransitioning) return;
       state.isTransitioning = true;
 
-      calibrationTitle.text("AUDIO CALIBRATION");
+      calibrationTitle.text("LATENCY COMPENSATION");
       calibrationText.html(
-        "Please place your microphone near your speakers and ensure the room is quiet.<br>The test will begin in a few seconds...",
+        "Please place your microphone near your speakers and ensure the room is quiet.<br>The test will begin in five (5) seconds...",
       );
       calibrationScreen.classOn("visible");
 
@@ -960,6 +969,10 @@ const pkg = {
       try {
         const latencyS = await Forte.runLatencyTest();
         const latencyMs = (latencyS * 1000).toFixed(0);
+        const updatedConfig = JSON.parse(JSON.stringify(config));
+        if (!updatedConfig.audioConfig) updatedConfig.audioConfig = {};
+        updatedConfig.audioConfig.micLatency = latencyS;
+        window.desktopIntegration.ipc.send("updateConfig", updatedConfig);
         calibrationTitle.text("CALIBRATION COMPLETE");
         calibrationText.text(`Measured audio latency is ${latencyMs} ms.`);
         InfoBar.show("CALIBRATION", `Success! Latency: ${latencyMs} ms`, {
@@ -982,6 +995,9 @@ const pkg = {
     }
 
     const toggleSearchOverlay = (visible) => {
+      if (state.currentSongIsMultiplexed) {
+        Forte.togglePianoRollVisibility(!visible);
+      }
       if (visible) {
         state.isSearchOverlayVisible = true;
         wrapper.classOn("search-overlay-active");
@@ -1031,9 +1047,15 @@ const pkg = {
         searchInput.elm.blur();
         updateMenuUI();
       } else if (newMode === "player") {
+        if (state.currentSongIsMultiplexed) {
+          Forte.togglePianoRollVisibility(true);
+        }
         playerUi.classOff("hidden");
         InfoBar.showDefault();
       } else if (newMode === "yt-search") {
+        if (state.currentSongIsMultiplexed) {
+          Forte.togglePianoRollVisibility(false);
+        }
         searchInput.elm.focus();
         searchInput.elm.select();
       }
