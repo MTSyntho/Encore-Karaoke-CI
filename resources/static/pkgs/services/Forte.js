@@ -64,45 +64,33 @@ const state = {
     vocalGuideAnalyser: null,
     pitchDetector: null,
     guideVocalDelayNode: null,
-
-    // --- NEW: Multi-Criteria Scoring State ---
     finalScore: 0,
     details: {
-      pitchAndRhythm: 0, // %
-      vibrato: 0, // %
-      upband: 0, // %
-      downband: 0, // %
+      pitchAndRhythm: 0,
+      vibrato: 0,
+      upband: 0,
+      downband: 0,
     },
-    // --- NEW: Latency ---
-    measuredLatencyS: 0.15, // A sensible default (150ms) before calibration
-
-    // --- NEW: Internal trackers for the criteria ---
-    // Pitch & Rhythm
+    measuredLatencyS: 0.15,
     totalScorableNotes: 0,
     notesHit: 0,
-    // Vibrato
     vibratoOpportunities: 0,
     vibratoNotesHit: 0,
-    // Transitions (Upband/Downband)
     upbandOpportunities: 0,
     upbandsHit: 0,
     downbandOpportunities: 0,
     downbandsHit: 0,
     lastGuidePitch: 0,
     hasScoredCurrentTransition: false,
-    hasScoredCurrentNoteStyle: false, // --- Added for Score Reasons ---
-
-    // Real-time state
+    hasScoredCurrentNoteStyle: false,
     pitchHistory: [],
     isVocalGuideNoteActive: false,
     hasHitCurrentNote: false,
     isHoldingNote: false,
     noteHoldStartTime: 0,
-
     micDevices: [],
     currentMicDeviceId: "default",
   },
-  // --- END: SCORING ENGINE ---
   playback: {
     status: "stopped",
     buffer: null,
@@ -111,23 +99,31 @@ const state = {
     isMidi: false,
     isMultiplexed: false,
     decodedLyrics: [],
-    guideNotes: [], // --- Changed for Piano Roll ---
-    isAnalyzing: false, // --- Added for Piano Roll ---
+    guideNotes: [],
+    isAnalyzing: false,
     startTime: 0,
     pauseTime: 0,
     devices: [],
     currentDeviceId: "default",
     transpose: 0,
-    multiplexPan: -1, // Default pan to left (instrumental)
+    multiplexPan: -1,
     leftPannerGain: null,
     rightPannerGain: null,
     volume: 1,
   },
-  // --- NEW: Recording Pipeline State ---
   recording: {
-    destinationNode: null, // The MediaStreamAudioDestinationNode
-    audioStream: null, // The final, exposed MediaStream
-    trackDelayNode: null, // The DelayNode for latency-compensating the track
+    destinationNode: null,
+    audioStream: null,
+    trackDelayNode: null,
+    // --- NEW ---
+    musicRecordingGainNode: null,
+  },
+  // --- NEW: Vocal Processing & Mix State ---
+  effects: {
+    micChainInput: null, // Entry point for the mic signal into the chain
+    micChainOutput: null, // Exit point for the processed mic signal, controls mic recording volume
+    vocalChain: [], // The array of active plugin instances
+    musicGainInRecording: 0.2, // Volume of the music in the final recording (0.0 to 1.0)
   },
   mic: {
     peerId: null,
@@ -839,12 +835,26 @@ const pkg = {
       masterGain.connect(masterCompressor);
       masterCompressor.connect(audioContext.destination);
 
-      // --- NEW: Initialize the persistent recording pipeline here ---
+      // --- MODIFIED: Initialize recording pipeline and effects chain together ---
+      // 1. Create the final destination for recording first.
       state.recording.destinationNode =
         audioContext.createMediaStreamDestination();
       state.recording.audioStream = state.recording.destinationNode.stream;
-      console.log("[FORTE SVC] Recording audio pipeline initialized.");
-      // --- END NEW ---
+
+      // 2. Initialize the vocal processing chain nodes.
+      state.effects.micChainInput = audioContext.createGain();
+      state.effects.micChainOutput = audioContext.createGain();
+
+      // 3. Initially, just pass the signal through if there are no plugins.
+      state.effects.micChainInput.connect(state.effects.micChainOutput);
+
+      // 4. Connect the final processed mic output to the recording destination.
+      // This connection is permanent. We will only change what happens *before* this.
+      state.effects.micChainOutput.connect(state.recording.destinationNode);
+      console.log(
+        "[FORTE SVC] Recording and effects audio pipelines initialized.",
+      );
+      // --- END MODIFIED ---
 
       state.playback.currentDeviceId = audioContext.sinkId || "default";
       console.log("[FORTE SVC] Web Audio API context initialized.");
@@ -995,7 +1005,6 @@ const pkg = {
   },
 
   data: {
-    // --- NEW: Public function to access the recording stream ---
     /**
      * Returns the persistent, mixed, and latency-compensated audio stream for recording.
      * @returns {MediaStream | null} The audio stream ready for recording.
@@ -1003,7 +1012,6 @@ const pkg = {
     getRecordingAudioStream: () => {
       return state.recording.audioStream;
     },
-    // --- END NEW ---
 
     // --- START: Added for Sound Effects ---
     loadSfx: async (url) => {
@@ -1239,22 +1247,26 @@ const pkg = {
     },
 
     playTrack: () => {
-      // if (toastElement) { ... }
       if (audioContext.state === "suspended") {
         audioContext.resume();
       }
 
-      // --- NEW: Setup the recording path for the track audio ---
       if (state.recording.destinationNode) {
-        // Create a new delay node for this playback instance
         state.recording.trackDelayNode = audioContext.createDelay();
-        // Use the same latency value calculated for scoring for perfect sync
+        const recordingGain = audioContext.createGain();
+
+        // --- MODIFIED: Use the dynamic gain from the effects state ---
+        recordingGain.gain.value = state.effects.musicGainInRecording;
+        // Keep a reference to this node so we can change it later
+        state.recording.musicRecordingGainNode = recordingGain;
+
         state.recording.trackDelayNode.delayTime.value =
           state.scoring.measuredLatencyS;
-        // Connect the delayed path to our final recording destination
-        state.recording.trackDelayNode.connect(state.recording.destinationNode);
+
+        state.recording.trackDelayNode
+          .connect(recordingGain)
+          .connect(state.recording.destinationNode);
       }
-      // --- END NEW ---
 
       if (state.playback.isMidi) {
         if (!state.playback.sequencer || state.playback.status === "playing")
@@ -1262,12 +1274,9 @@ const pkg = {
         state.playback.sequencer.play();
         state.playback.status = "playing";
 
-        // --- NEW: Connect MIDI synth to recording pipeline ---
         if (state.recording.trackDelayNode && state.playback.synthesizer) {
-          // The synthesizer is the source of MIDI audio
           state.playback.synthesizer.connect(state.recording.trackDelayNode);
         }
-        // --- END NEW ---
       } else {
         if (!state.playback.buffer || state.playback.status === "playing")
           return;
@@ -1278,16 +1287,14 @@ const pkg = {
         sourceNode.playbackRate.value = rate;
 
         if (state.playback.isMultiplexed) {
-          // ... (existing piano roll, scoring setup)
           if (state.playback.guideNotes) {
-            pianoRollTrack.clear(); // Clear any previous notes
-            renderPianoRollNotes(state.playback.guideNotes); // Re-render existing notes
+            pianoRollTrack.clear();
+            renderPianoRollNotes(state.playback.guideNotes);
             if (state.ui.pianoRollVisible) {
               pianoRollContainer.classOn("visible");
             }
           }
           state.scoring.enabled = true;
-          // ... (reset scoring variables) ...
           state.scoring.finalScore = 0;
           state.scoring.details = {
             pitchAndRhythm: 0,
@@ -1325,8 +1332,8 @@ const pkg = {
           state.playback.rightPannerGain = rightGain;
 
           sourceNode.connect(splitter);
-          splitter.connect(leftGain, 0); // Instrumental (Left channel) to playback
-          splitter.connect(rightGain, 1); // Vocal Guide (Right channel) to playback
+          splitter.connect(leftGain, 0);
+          splitter.connect(rightGain, 1);
 
           splitter.connect(delayNode, 1);
           delayNode.connect(vocalGuideAnalyser);
@@ -1335,24 +1342,18 @@ const pkg = {
           rightGain.connect(monoMixer);
           monoMixer.connect(masterGain);
 
-          // --- NEW: Connect INSTRUMENTAL ONLY to the recording pipeline ---
           if (state.recording.trackDelayNode) {
-            // Connect channel 0 (left, instrumental) to the delay node for recording
             splitter.connect(state.recording.trackDelayNode, 0);
           }
-          // --- END NEW ---
 
           pkg.data.setMultiplexPan(state.playback.multiplexPan);
           console.log("[FORTE SVC] Playing track in multiplexed panner mode.");
         } else {
-          // Standard non-multiplexed audio track
           sourceNode.connect(masterGain);
 
-          // --- NEW: Connect standard audio to the recording pipeline ---
           if (state.recording.trackDelayNode) {
             sourceNode.connect(state.recording.trackDelayNode);
           }
-          // --- END NEW ---
         }
 
         sourceNode.onended = () => {
@@ -1375,12 +1376,9 @@ const pkg = {
     pauseTrack: () => {
       if (state.playback.status !== "playing") return;
 
-      // Disable scoring and clean up analysis nodes
       state.scoring.enabled = false;
-      // ... (existing cleanup)
       pianoRollContainer.classOff("visible");
 
-      // --- NEW: Tear down the track's recording path on pause ---
       if (state.recording.trackDelayNode) {
         state.recording.trackDelayNode.disconnect();
         if (state.playback.isMidi && state.playback.synthesizer) {
@@ -1394,7 +1392,6 @@ const pkg = {
         }
         state.recording.trackDelayNode = null;
       }
-      // --- END NEW ---
 
       if (state.playback.isMidi) {
         state.playback.sequencer.pause();
@@ -1429,9 +1426,6 @@ const pkg = {
 
       if (state.playback.status === "stopped") return;
 
-      // ... (existing piano roll and score reason cleanup)
-
-      // --- NEW: Tear down the track's recording path on stop ---
       if (state.recording.trackDelayNode) {
         state.recording.trackDelayNode.disconnect();
         if (state.playback.isMidi && state.playback.synthesizer) {
@@ -1445,9 +1439,6 @@ const pkg = {
         }
         state.recording.trackDelayNode = null;
       }
-      // --- END NEW ---
-
-      // ... (existing scoring node cleanup)
 
       if (state.playback.isMidi) {
         if (state.playback.sequencer) {
@@ -1463,7 +1454,7 @@ const pkg = {
 
       state.playback.leftPannerGain = null;
       state.playback.rightPannerGain = null;
-      state.playback.multiplexPan = -1; // Also reset to default on stop
+      state.playback.multiplexPan = -1;
       state.playback.status = "stopped";
       state.playback.pauseTime = 0;
       dispatchPlaybackUpdate();
@@ -1577,7 +1568,7 @@ const pkg = {
         decodedLyrics: state.playback.decodedLyrics,
         transpose: state.playback.transpose,
         multiplexPan: state.playback.multiplexPan,
-        score: pkg.data.getScoringState(), // Report the detailed score object
+        score: pkg.data.getScoringState(),
       };
     },
 
@@ -1588,11 +1579,6 @@ const pkg = {
       await pkg.data.startMicInput(state.scoring.currentMicDeviceId);
     },
 
-    // --- NEW: LATENCY CALIBRATION FUNCTION ---
-    /**
-     * Performs a sophisticated, automated audio latency test using pitch detection.
-     * @returns {Promise<number>} The measured latency in seconds.
-     */
     runLatencyTest: async () => {
       if (
         !audioContext ||
@@ -1603,12 +1589,11 @@ const pkg = {
       }
       console.log("[FORTE SVC] Starting latency calibration test...");
 
-      // Constants for the test
       const NTESTS = 8;
       const TEST_INTERVAL_S = 0.5;
       const TEST_TONE_DURATION_S = 0.1;
-      const TEST_FREQ_HZ = 880.0; // A5, easier to distinguish from noise
-      const TEST_PITCH_MIDI = 81; // MIDI note for A5
+      const TEST_FREQ_HZ = 880.0;
+      const TEST_PITCH_MIDI = 81;
       const WARMUP_S = 1.0;
       const TIMEOUT_S = WARMUP_S + NTESTS * TEST_INTERVAL_S + 2.0;
 
@@ -1619,14 +1604,13 @@ const pkg = {
 
       const testPromise = new Promise((resolve, reject) => {
         let latencies = [];
-        let detectedBeeps = new Set(); // To avoid detecting the same beep multiple times
+        let detectedBeeps = new Set();
 
-        // 1. Schedule test tones
         const osc = audioContext.createOscillator();
         const gain = audioContext.createGain();
         osc.frequency.value = TEST_FREQ_HZ;
         gain.gain.value = 0;
-        osc.connect(gain).connect(masterGain); // Connect to master gain to be audible
+        osc.connect(gain).connect(masterGain);
         osc.start();
 
         const baseTime = audioContext.currentTime + WARMUP_S;
@@ -1636,13 +1620,12 @@ const pkg = {
           gain.gain.setValueAtTime(0, toneStartTime + TEST_TONE_DURATION_S);
         }
 
-        // 2. Start listening loop
         const listenLoop = () => {
           if (
             audioContext.currentTime >
             baseTime + NTESTS * TEST_INTERVAL_S + 1.0
           ) {
-            return; // Stop requesting frames, test window is over
+            return;
           }
 
           analyser.getFloatTimeDomainData(buffer);
@@ -1669,7 +1652,6 @@ const pkg = {
               const latency = inputTime - scheduledTime;
 
               if (latency > 0.01 && latency < 0.5) {
-                // Sanity check
                 latencies.push(latency);
                 detectedBeeps.add(closestBeepIndex);
               }
@@ -1679,7 +1661,6 @@ const pkg = {
         };
         animationFrameId = requestAnimationFrame(listenLoop);
 
-        // 3. Set a timeout to end the test and analyze results
         setTimeout(() => {
           cancelAnimationFrame(animationFrameId);
           osc.stop();
@@ -1778,15 +1759,19 @@ const pkg = {
         const analyser = audioContext.createAnalyser();
         analyser.fftSize = 2048;
 
-        // Route mic to the SCORING analyser
-        source.connect(analyser);
+        // --- MODIFIED: Reroute the mic signal through the new plugin chain ---
 
-        // --- MODIFIED: Also route mic to the RECORDING destination ---
-        if (state.recording.destinationNode) {
-          // Connect the raw mic source directly to the recording destination.
-          // This happens only once and persists.
-          source.connect(state.recording.destinationNode);
-        }
+        // 1. The raw mic source now connects ONLY to the input of our effects chain.
+        source.connect(state.effects.micChainInput);
+
+        // 2. The SCORING analyser also listens to the RAW, unprocessed mic input.
+        //    This is crucial for accurate pitch detection without latency or effects.
+        state.effects.micChainInput.connect(analyser);
+
+        // 3. The PROCESSED signal from the chain's output is what goes to the recording.
+        //    This connection was already made during initialization and is permanent.
+        //    (state.effects.micChainOutput -> state.recording.destinationNode)
+
         // --- END MODIFIED ---
 
         state.scoring.micSourceNode = source;
@@ -1797,11 +1782,159 @@ const pkg = {
             analyser.fftSize,
           );
         }
-        console.log("[FORTE SVC] Microphone input started for scoring.");
+        console.log(
+          "[FORTE SVC] Microphone input started and routed through effects chain.",
+        );
       } catch (e) {
         console.error("[FORTE SVC] Failed to get microphone input:", e);
       }
     },
+
+    // --- NEW: Vocal Chain & Mix Control API ---
+
+    /**
+     * Clears the current vocal chain and loads a new one from a configuration object.
+     * @param {Array<object>} chainConfig - An array of plugin configurations.
+     */
+    loadVocalChain: async (chainConfig) => {
+      // 1. Disconnect and clear the old chain
+      state.effects.vocalChain.forEach((plugin) => plugin.disconnect());
+      state.effects.vocalChain = [];
+
+      // 2. Load and instantiate each plugin in the new chain
+      for (const pluginConfig of chainConfig) {
+        try {
+          // Dynamically import the plugin's code. This is the "VST" loading mechanism.
+          const pluginModule = await import(pluginConfig.path);
+          const PluginClass = pluginModule.default;
+
+          let pluginInstance;
+
+          if (typeof PluginClass.create === "function") {
+            // If the plugin has a static `create` method, it's for async setup
+            pluginInstance = await PluginClass.create(audioContext);
+          } else {
+            // Otherwise, use the standard synchronous constructor
+            pluginInstance = new PluginClass(audioContext);
+          }
+
+          // Set initial parameters from the JSON config
+          if (pluginConfig.params) {
+            for (const [key, value] of Object.entries(pluginConfig.params)) {
+              pluginInstance.setParameter(key, value);
+            }
+          }
+
+          state.effects.vocalChain.push(pluginInstance);
+        } catch (e) {
+          console.error(
+            `[FORTE SVC] Failed to load plugin from ${pluginConfig.path}`,
+            e,
+          );
+        }
+      }
+
+      // 3. Reconnect all nodes in the new order
+      pkg.data.rebuildVocalChain();
+      console.log(
+        `[FORTE SVC] Vocal chain loaded with ${state.effects.vocalChain.length} plugins.`,
+      );
+    },
+
+    /**
+     * Connects all plugins in the vocalChain array in sequence.
+     * This is the core function that makes the dynamic chain work.
+     */
+    rebuildVocalChain: () => {
+      const { micChainInput, micChainOutput, vocalChain } = state.effects;
+
+      // Disconnect whatever is currently connected to the chain's input node
+      micChainInput.disconnect();
+
+      // The raw mic signal ALWAYS feeds the scoring analyser (pre-effects).
+      micChainInput.connect(state.scoring.micAnalyser);
+
+      let lastNode = micChainInput;
+      if (vocalChain.length > 0) {
+        // Connect each plugin sequentially: output of one to input of the next
+        vocalChain.forEach((plugin) => {
+          lastNode.connect(plugin.input);
+          lastNode = plugin.output;
+        });
+      }
+
+      // Connect the end of the chain (or the input if chain is empty) to the main chain output
+      lastNode.connect(micChainOutput);
+    },
+
+    /**
+     * Sets a parameter on a specific plugin in the chain.
+     * @param {number} pluginIndex - The index of the plugin in the chain.
+     * @param {string} paramName - The name of the parameter to set.
+     * @param {any} value - The new value for the parameter.
+     */
+    setPluginParameter: (pluginIndex, paramName, value) => {
+      const plugin = state.effects.vocalChain[pluginIndex];
+      if (plugin) {
+        plugin.setParameter(paramName, value);
+      } else {
+        console.warn(
+          `[FORTE SVC] Attempted to set parameter on non-existent plugin at index ${pluginIndex}`,
+        );
+      }
+    },
+
+    /**
+     * Sets the volume of the microphone in the final recording mix.
+     * This controls the gain of the final node in the effects chain.
+     * @param {number} level - Volume level from 0.0 (silent) to 2.0 (6dB boost).
+     */
+    setMicRecordingVolume: (level) => {
+      const clampedLevel = Math.max(0, Math.min(2, level));
+      if (state.effects.micChainOutput) {
+        state.effects.micChainOutput.gain.setTargetAtTime(
+          clampedLevel,
+          audioContext.currentTime,
+          0.01,
+        );
+      }
+    },
+
+    /**
+     * Sets the volume of the instrumental track in the final recording mix.
+     * @param {number} level - Volume level from 0.0 (silent) to 1.0 (original volume).
+     */
+    setMusicRecordingVolume: (level) => {
+      const clampedLevel = Math.max(0, Math.min(1, level));
+      state.effects.musicGainInRecording = clampedLevel;
+      // If a song is currently playing, adjust its dedicated recording gain node in real-time
+      if (state.recording.musicRecordingGainNode) {
+        state.recording.musicRecordingGainNode.gain.setTargetAtTime(
+          clampedLevel,
+          audioContext.currentTime,
+          0.01,
+        );
+      }
+    },
+
+    /**
+     * Returns the metadata for the currently loaded vocal chain for the UI to render.
+     * @returns {object} An object containing the current mix gains and the plugin chain state.
+     */
+    getVocalChainState: () => {
+      const chainState = state.effects.vocalChain.map((plugin) => ({
+        name: plugin.name,
+        parameters: plugin.parameters, // Exposes the parameter definitions and current values
+      }));
+
+      return {
+        micGain: state.effects.micChainOutput?.gain.value || 1.0,
+        musicGain: state.effects.musicGainInRecording,
+        chain: chainState,
+      };
+    },
+
+    // --- END NEW ---
   },
 
   end: async function () {
@@ -1827,12 +1960,18 @@ const pkg = {
     }
 
     if (audioContext && audioContext.state !== "closed") {
+      // --- NEW: Disconnect new nodes on shutdown ---
+      if (state.effects.micChainInput) state.effects.micChainInput.disconnect();
+      if (state.effects.micChainOutput)
+        state.effects.micChainOutput.disconnect();
+      if (state.effects.vocalChain)
+        state.effects.vocalChain.forEach((p) => p.disconnect());
+      // --- END NEW ---
+
       if (masterCompressor) masterCompressor.disconnect();
-      // --- NEW: Disconnect recording node on shutdown ---
       if (state.recording.destinationNode) {
         state.recording.destinationNode.disconnect();
       }
-      // --- END NEW ---
       audioContext.close();
     }
     if (sfxAudioContext && sfxAudioContext.state !== "closed") {

@@ -648,6 +648,15 @@ const pkg = {
     const socket = io({ query: { clientType: "app" } });
     socket.on("connect", () => console.log("[LINK] Connected to server."));
 
+    console.log("[Encore] Loading vocal chain...");
+    try {
+      const response = await fetch("/pkgs/chains/defaultVocalChain.json");
+      const defaultChain = await response.json();
+      await Forte.loadVocalChain(defaultChain);
+    } catch (e) {
+      console.error("Could not load default vocal chain.", e);
+    }
+
     songList = FsSvc.getSongList();
     const songMap = new Map(songList.map((song) => [song.code, song]));
     let songItemElements = [];
