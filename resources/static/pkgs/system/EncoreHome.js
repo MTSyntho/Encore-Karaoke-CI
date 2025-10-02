@@ -14,6 +14,319 @@ let songList;
 
 const config = await window.desktopIntegration.ipc.invoke("getConfig");
 
+// --- NEW: MixerUI Module ---
+const MixerUI = {
+  isVisible: false,
+  modal: null,
+  listPanel: null,
+  controlsPanel: null,
+  state: {}, // To hold the data from Forte
+
+  // Navigation state
+  activePanel: "list", // 'list' or 'controls'
+  selectedIndex: 0,
+  selectedParamIndex: 0,
+
+  init(container) {
+    this.modal = new Html("div").class("mixer-modal").appendTo(container);
+    const content = new Html("div").class("mixer-content").appendTo(this.modal);
+
+    const header = new Html("div").class("mixer-header").appendTo(content);
+    new Html("h1").text("MIC / MUSIC SETUP").appendTo(header);
+    new Html("p")
+      .text(
+        "Use Arrow Keys to navigate, [Tab] to switch panels, [ESC] to close.",
+      )
+      .appendTo(header);
+
+    const main = new Html("div").class("mixer-main").appendTo(content);
+    this.listPanel = new Html("div").class("mixer-list-panel").appendTo(main);
+    this.controlsPanel = new Html("div")
+      .class("mixer-controls-panel")
+      .appendTo(main);
+
+    console.log("[MixerUI] Initialized.");
+  },
+
+  toggle() {
+    this.isVisible = !this.isVisible;
+    if (this.isVisible) {
+      this.build();
+      this.modal.classOn("visible");
+      this.activePanel = "list";
+      this.selectedIndex = 0;
+      this.selectedParamIndex = 0;
+      this._updateListHighlight();
+      this._renderControls();
+    } else {
+      this.modal.classOff("visible");
+    }
+  },
+
+  build() {
+    this.state = Forte.getVocalChainState();
+    this.listPanel.clear();
+
+    // 1. Add Master Mix Controls
+    new Html("div")
+      .class("mixer-item")
+      .text("Mic Record Volume")
+      .appendTo(this.listPanel);
+    new Html("div")
+      .class("mixer-item")
+      .text("Music Record Volume")
+      .appendTo(this.listPanel);
+
+    // 2. Add Plugins from the chain
+    this.state.chain.forEach((plugin) => {
+      new Html("div")
+        .class("mixer-item")
+        .text(plugin.name)
+        .appendTo(this.listPanel);
+    });
+  },
+
+  _renderControls() {
+    this.controlsPanel.clear();
+    const items = this.listPanel.qsa(".mixer-item");
+    if (!items || !items[this.selectedIndex]) return;
+
+    const title = items[this.selectedIndex].getText();
+    new Html("h2")
+      .class("mixer-controls-title")
+      .text(title)
+      .appendTo(this.controlsPanel);
+
+    const controlsContainer = new Html("div")
+      .class("mixer-controls-container")
+      .appendTo(this.controlsPanel);
+
+    // Case 1: Mic Record Volume
+    if (this.selectedIndex === 0) {
+      this._createSlider(
+        controlsContainer,
+        "Gain",
+        {
+          type: "slider",
+          min: 0,
+          max: 2,
+          step: 0.01,
+          unit: "x",
+          value: this.state.micGain,
+        },
+        (value) => {
+          Forte.setMicRecordingVolume(value);
+          this.state.micGain = value; // Update local state for immediate feedback
+        },
+        0,
+      );
+    }
+    // Case 2: Music Record Volume
+    else if (this.selectedIndex === 1) {
+      this._createSlider(
+        controlsContainer,
+        "Level",
+        {
+          type: "slider",
+          min: 0,
+          max: 1,
+          step: 0.01,
+          unit: "%",
+          value: this.state.musicGain,
+        },
+        (value) => {
+          Forte.setMusicRecordingVolume(value);
+          this.state.musicGain = value; // Update local state
+        },
+        0,
+      );
+    }
+    // Case 3: A Plugin
+    else {
+      const pluginIndex = this.selectedIndex - 2;
+      const plugin = this.state.chain[pluginIndex];
+      if (plugin && plugin.parameters) {
+        Object.entries(plugin.parameters).forEach(
+          ([paramName, paramDef], pIndex) => {
+            // Skip the special 'bands' parameter for ParametricEQ
+            if (paramName === "bands") return;
+
+            this._createSlider(
+              controlsContainer,
+              paramName.replace(/_/g, " "),
+              paramDef,
+              (value) => {
+                Forte.setPluginParameter(pluginIndex, paramName, value);
+              },
+              pIndex,
+            );
+          },
+        );
+      }
+    }
+    this._updateControlsHighlight();
+  },
+
+  _createSlider(container, name, paramDef, callback, paramIndex) {
+    const controlEl = new Html("div")
+      .class("mixer-control")
+      .appendTo(container);
+    controlEl.attr({ "data-param-index": paramIndex });
+
+    const label = new Html("label").text(name).appendTo(controlEl);
+    const sliderWrapper = new Html("div")
+      .class("mixer-slider-wrapper")
+      .appendTo(controlEl);
+    const slider = new Html("input")
+      .attr({
+        type: "range",
+        min: paramDef.min,
+        max: paramDef.max,
+        step: paramDef.step,
+        value: paramDef.value,
+      })
+      .appendTo(sliderWrapper);
+    const valueDisplay = new Html("span")
+      .class("mixer-value-display")
+      .appendTo(controlEl);
+
+    const updateDisplay = (val) => {
+      let displayValue;
+      if (paramDef.unit === "%") {
+        displayValue = `${(val * 100).toFixed(0)}%`;
+      } else if (
+        paramDef.unit === "dB" ||
+        paramDef.unit === ":1" ||
+        paramDef.unit === "Q"
+      ) {
+        displayValue = `${parseFloat(val).toFixed(1)} ${paramDef.unit}`;
+      } else if (paramDef.unit === "ms" || paramDef.unit === "Hz") {
+        displayValue = `${Math.round(val)} ${paramDef.unit}`;
+      } else {
+        displayValue = `${parseFloat(val).toFixed(2)} ${paramDef.unit || ""}`;
+      }
+      valueDisplay.text(displayValue.trim());
+    };
+
+    slider.on("input", (e) => {
+      const newValue = parseFloat(e.target.value);
+      callback(newValue);
+      updateDisplay(newValue);
+    });
+
+    updateDisplay(paramDef.value); // Set initial value
+  },
+
+  _updateListHighlight() {
+    this.listPanel.qsa(".mixer-item").forEach((item, index) => {
+      if (this.activePanel === "list" && index === this.selectedIndex) {
+        item.classOn("mixer-item--active");
+        item.elm.scrollIntoView({ block: "nearest" });
+      } else {
+        item.classOff("mixer-item--active");
+      }
+    });
+  },
+
+  _updateControlsHighlight() {
+    this.controlsPanel.qsa(".mixer-control").forEach((control, index) => {
+      if (
+        this.activePanel === "controls" &&
+        index === this.selectedParamIndex
+      ) {
+        control.classOn("mixer-control--active");
+        control.elm.scrollIntoView({ block: "nearest" });
+      } else {
+        control.classOff("mixer-control--active");
+      }
+    });
+  },
+
+  handleKeyDown(e) {
+    e.preventDefault();
+    const numListItems = this.listPanel.qsa(".mixer-item").length;
+    const numParamItems = this.controlsPanel.qsa(".mixer-control").length;
+
+    switch (e.key) {
+      case "ArrowUp":
+        if (this.activePanel === "list") {
+          this.selectedIndex = Math.max(0, this.selectedIndex - 1);
+          this.selectedParamIndex = 0;
+          this._updateListHighlight();
+          this._renderControls();
+        } else {
+          // 'controls'
+          this.selectedParamIndex = Math.max(0, this.selectedParamIndex - 1);
+          this._updateControlsHighlight();
+        }
+        break;
+
+      case "ArrowDown":
+        if (this.activePanel === "list") {
+          this.selectedIndex = Math.min(
+            numListItems - 1,
+            this.selectedIndex + 1,
+          );
+          this.selectedParamIndex = 0;
+          this._updateListHighlight();
+          this._renderControls();
+        } else {
+          // 'controls'
+          this.selectedParamIndex = Math.min(
+            numParamItems - 1,
+            this.selectedParamIndex + 1,
+          );
+          this._updateControlsHighlight();
+        }
+        break;
+
+      case "ArrowRight":
+        if (this.activePanel === "list" && numParamItems > 0) {
+          this.activePanel = "controls";
+          this._updateListHighlight();
+          this._updateControlsHighlight();
+        } else if (this.activePanel === "controls") {
+          const activeControl = this.controlsPanel.qs(
+            `.mixer-control[data-param-index="${this.selectedParamIndex}"]`,
+          );
+          const slider = activeControl?.qs('input[type="range"]');
+          if (slider) {
+            slider.elm.stepUp();
+            slider.elm.dispatchEvent(new Event("input", { bubbles: true }));
+          }
+        }
+        break;
+
+      case "ArrowLeft":
+        if (this.activePanel === "controls") {
+          const activeControl = this.controlsPanel.qs(
+            `.mixer-control[data-param-index="${this.selectedParamIndex}"]`,
+          );
+          const slider = activeControl?.qs('input[type="range"]');
+          if (slider) {
+            slider.elm.stepDown();
+            slider.elm.dispatchEvent(new Event("input", { bubbles: true }));
+          }
+        }
+        break;
+
+      case "Tab": // Use Tab to switch panels
+        if (this.activePanel === "list" && numParamItems > 0) {
+          this.activePanel = "controls";
+        } else {
+          this.activePanel = "list";
+        }
+        this._updateListHighlight();
+        this._updateControlsHighlight();
+        break;
+
+      case "Escape":
+        this.toggle();
+        break;
+    }
+  },
+};
+
 // --- Recorder Module ---
 const Recorder = {
   isRecording: false,
@@ -648,14 +961,21 @@ const pkg = {
     const socket = io({ query: { clientType: "app" } });
     socket.on("connect", () => console.log("[LINK] Connected to server."));
 
-    console.log("[Encore] Loading vocal chain...");
+    // --- MODIFIED: Load vocal chain on startup ---
+    console.log("[Encore] Loading default vocal chain...");
     try {
+      // NOTE: Ensure this path is correct for your project's file structure.
       const response = await fetch("/pkgs/chains/defaultVocalChain.json");
+      if (!response.ok)
+        throw new Error(`HTTP error! status: ${response.status}`);
       const defaultChain = await response.json();
       await Forte.loadVocalChain(defaultChain);
+      console.log("[Encore] Default vocal chain loaded successfully.");
     } catch (e) {
-      console.error("Could not load default vocal chain.", e);
+      console.error("[Encore] Could not load default vocal chain.", e);
+      InfoBar.showTemp("ERROR", "Could not load vocal chain.", 5000);
     }
+    // --- END MODIFIED ---
 
     songList = FsSvc.getSongList();
     const songMap = new Map(songList.map((song) => [song.code, song]));
@@ -765,6 +1085,10 @@ const pkg = {
 
     InfoBar.init(wrapper);
     ScoreHUD.init(wrapper);
+
+    // --- NEW: Initialize the Mixer UI ---
+    MixerUI.init(wrapper);
+    // --- END NEW ---
 
     const calibrationScreen = new Html("div")
       .class("calibration-screen")
@@ -892,6 +1216,150 @@ const pkg = {
         .calibration-screen.visible { opacity: 1; pointer-events: all; }
         .calibration-screen h1 { font-size: 3rem; letter-spacing: 0.1em; color: #89CFF0; margin-bottom: 1rem; }
         .calibration-screen p { font-size: 1.5rem; opacity: 0.8; max-width: 60ch; }
+        /* --- NEW: Mixer UI Styles --- */
+        .mixer-modal {
+            position: absolute;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(15px);
+            z-index: 10000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s ease;
+            font-family: 'Rajdhani', sans-serif;
+            color: #FFF;
+        }
+        .mixer-modal.visible {
+            opacity: 1;
+            pointer-events: all;
+        }
+        .mixer-content {
+            width: 80vw;
+            height: 80vh;
+            max-width: 1200px;
+            background: rgba(10, 10, 20, 0.85);
+            border: 1px solid rgba(137, 207, 240, 0.4);
+            border-radius: 1rem;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .mixer-header {
+            padding: 1rem 1.5rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+            flex-shrink: 0;
+        }
+        .mixer-header h1 {
+            margin: 0;
+            font-size: 1.8rem;
+            letter-spacing: 0.1em;
+            color: #89CFF0;
+        }
+        .mixer-header p {
+            margin: 0.25rem 0 0 0;
+            opacity: 0.6;
+            font-size: 0.9rem;
+        }
+        .mixer-main {
+            display: flex;
+            flex-grow: 1;
+            overflow: hidden;
+        }
+        .mixer-list-panel {
+            flex: 1;
+            border-right: 1px solid rgba(255, 255, 255, 0.2);
+            overflow-y: auto;
+            padding: 0.5rem 0;
+        }
+        .mixer-item {
+            padding: 0.75rem 1.5rem;
+            font-size: 1.2rem;
+            font-weight: 600;
+            cursor: default;
+            border-left: 4px solid transparent;
+            transition: background-color 0.2s ease, border-color 0.2s ease;
+        }
+        .mixer-item--active {
+            background-color: rgba(137, 207, 240, 0.2);
+            border-left-color: #89CFF0;
+        }
+        .mixer-controls-panel {
+            flex: 3;
+            padding: 1rem 1.5rem;
+            overflow-y: auto;
+        }
+        .mixer-controls-title {
+            margin: 0 0 1.5rem 0;
+            font-size: 1.5rem;
+            color: #FFD700;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            padding-bottom: 0.75rem;
+        }
+        .mixer-controls-container {
+            display: flex;
+            flex-direction: column;
+            gap: 1.25rem;
+        }
+        .mixer-control {
+            display: grid;
+            grid-template-columns: 200px 1fr 100px;
+            align-items: center;
+            gap: 1rem;
+            padding: 0.5rem;
+            border-radius: 0.25rem;
+            transition: background-color 0.2s ease;
+        }
+        .mixer-control--active {
+            background-color: rgba(137, 207, 240, 0.1);
+        }
+        .mixer-control label {
+            font-weight: 500;
+            text-transform: capitalize;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .mixer-value-display {
+            font-weight: 700;
+            font-size: 1.1rem;
+            text-align: right;
+            color: #89CFF0;
+        }
+        .mixer-slider-wrapper {
+            width: 100%;
+        }
+        input[type=range] { /* Style the slider */
+            -webkit-appearance: none;
+            width: 100%;
+            height: 8px;
+            background: rgba(0,0,0,0.5);
+            border-radius: 4px;
+            border: 1px solid rgba(255,255,255,0.2);
+            outline: none;
+        }
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            background: #89CFF0;
+            border-radius: 50%;
+            cursor: pointer;
+            border: 2px solid #010141;
+        }
+        input[type=range]::-moz-range-thumb {
+            width: 20px;
+            height: 20px;
+            background: #89CFF0;
+            border-radius: 50%;
+            cursor: pointer;
+            border: 2px solid #010141;
+        }
+        /* --- END NEW --- */
     `,
       )
       .appendTo(wrapper);
@@ -909,10 +1377,14 @@ const pkg = {
     const songInfo = new Html("div").class("song-info").appendTo(mainContent);
     const songTitle = new Html("h2").class("song-title").appendTo(songInfo);
     const songArtist = new Html("p").class("song-artist").appendTo(songInfo);
+    // --- MODIFIED: Added Mixer hint ---
     new Html("p")
       .class("search-hint")
-      .html("Press 'Y' to Search YouTube<br>Press 'C' to Calibrate Audio")
+      .html(
+        "Press 'Y' to Search YouTube<br>Press 'C' to Calibrate Audio<br>Press 'M' for Mic/Music Setup",
+      )
       .appendTo(mainContent);
+    // --- END MODIFIED ---
     new Html("h2").text("Song List").appendTo(rightPanel);
     const songListContainer = new Html("div")
       .class("song-list-container")
@@ -1942,6 +2414,13 @@ const pkg = {
     };
 
     keydownHandler = (e) => {
+      // --- NEW: Intercept keys if Mixer UI is visible ---
+      if (MixerUI.isVisible) {
+        MixerUI.handleKeyDown(e);
+        return;
+      }
+      // --- END NEW ---
+
       const isSearchInputFocused = document.activeElement === searchInput.elm;
       if (isSearchInputFocused) {
         if (e.key === "Backspace" && searchInput.getValue().length === 0) {
@@ -1957,6 +2436,14 @@ const pkg = {
       } else {
         e.preventDefault();
       }
+
+      // --- NEW: Handle Mixer toggle ---
+      if (e.key.toLowerCase() === "m") {
+        MixerUI.toggle();
+        return;
+      }
+      // --- END NEW ---
+
       if (e.key.toLowerCase() === "r") {
         if (state.mode === "player" && !state.currentSongIsYouTube) {
           Recorder.toggle();
