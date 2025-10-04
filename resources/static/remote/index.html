@@ -103,6 +103,12 @@
         flex-direction: column;
       }
 
+      /* Hide bottom controls when search is active */
+      .search-view.active ~ .remote-view .bottom-controls,
+      .search-view.active + .remote-view .bottom-controls {
+        display: none;
+      }
+
       /* Remote View Grid */
       .remote-grid {
         display: grid;
@@ -339,9 +345,8 @@
         <!-- Main Remote View -->
         <div class="remote-view active">
           <div class="remote-grid">
-            <!-- Content is identical, omitted for brevity -->
             <!-- Row 1 -->
-            <button class="control-btn" data-type="yt_search">YouTube</button>
+            <button class="control-btn" data-type="yt_search">Search</button>
             <button class="control-btn" data-type="stop" data-value="Escape">
               Stop
             </button>
@@ -410,18 +415,18 @@
               Vol &darr;
             </button>
           </div>
-        </div>
 
-        <!-- Add bottom control buttons -->
-        <div class="remote-grid" style="margin-top: 0.75rem">
-          <button class="control-btn" data-type="toggle_bgv">BGV</button>
-          <button
-            class="control-btn"
-            data-type="toggle_recording"
-            style="color: #ff4444"
-          >
-            REC
-          </button>
+          <!-- Bottom control buttons -->
+          <div class="remote-grid bottom-controls" style="margin-top: 0.75rem">
+            <button class="control-btn" data-type="toggle_bgv">BGV</button>
+            <button
+              class="control-btn"
+              data-type="toggle_recording"
+              style="color: #ff4444"
+            >
+              REC
+            </button>
+          </div>
         </div>
 
         <!-- YouTube Search View -->
@@ -430,7 +435,7 @@
           <input
             type="text"
             class="search-input-remote"
-            placeholder="Search on YouTube..."
+            placeholder="Search for songs..."
           />
           <button class="search-submit-btn">Search</button>
           <div class="search-controls">
