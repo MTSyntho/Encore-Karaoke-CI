@@ -14,7 +14,7 @@ let songList;
 
 const config = await window.desktopIntegration.ipc.invoke("getConfig");
 
-// --- NEW: MixerUI Module ---
+// --- MODIFIED: MixerUI Module is now clickable ---
 const MixerUI = {
   isVisible: false,
   modal: null,
@@ -28,10 +28,12 @@ const MixerUI = {
   selectedParamIndex: 0,
 
   init(container) {
-    this.modal = new Html("div").class("mixer-modal").appendTo(container);
-    const content = new Html("div").class("mixer-content").appendTo(this.modal);
+    this.modal = new Html("div").classOn("mixer-modal").appendTo(container);
+    const content = new Html("div")
+      .classOn("mixer-content")
+      .appendTo(this.modal);
 
-    const header = new Html("div").class("mixer-header").appendTo(content);
+    const header = new Html("div").classOn("mixer-header").appendTo(content);
     new Html("h1").text("MIC / MUSIC SETUP").appendTo(header);
     new Html("p")
       .text(
@@ -39,11 +41,18 @@ const MixerUI = {
       )
       .appendTo(header);
 
-    const main = new Html("div").class("mixer-main").appendTo(content);
-    this.listPanel = new Html("div").class("mixer-list-panel").appendTo(main);
+    const main = new Html("div").classOn("mixer-main").appendTo(content);
+    this.listPanel = new Html("div").classOn("mixer-list-panel").appendTo(main);
     this.controlsPanel = new Html("div")
-      .class("mixer-controls-panel")
+      .classOn("mixer-controls-panel")
       .appendTo(main);
+
+    // --- NEW: Allow closing modal by clicking background ---
+    this.modal.on("click", (e) => {
+      if (e.target === this.modal.elm) {
+        this.toggle();
+      }
+    });
 
     console.log("[MixerUI] Initialized.");
   },
@@ -67,21 +76,23 @@ const MixerUI = {
     this.state = Forte.getVocalChainState();
     this.listPanel.clear();
 
-    // 1. Add Master Mix Controls
-    new Html("div")
-      .class("mixer-item")
-      .text("Mic Record Volume")
-      .appendTo(this.listPanel);
-    new Html("div")
-      .class("mixer-item")
-      .text("Music Record Volume")
-      .appendTo(this.listPanel);
+    const items = [
+      "Mic Record Volume",
+      "Music Record Volume",
+      ...this.state.chain.map((p) => p.name),
+    ];
 
-    // 2. Add Plugins from the chain
-    this.state.chain.forEach((plugin) => {
+    items.forEach((name, index) => {
       new Html("div")
-        .class("mixer-item")
-        .text(plugin.name)
+        .classOn("mixer-item")
+        .text(name)
+        .on("click", () => {
+          this.selectedIndex = index;
+          this.selectedParamIndex = 0; // Reset param index when changing item
+          this.activePanel = "list"; // Focus should return to the list
+          this._updateListHighlight();
+          this._renderControls();
+        })
         .appendTo(this.listPanel);
     });
   },
@@ -93,12 +104,12 @@ const MixerUI = {
 
     const title = items[this.selectedIndex].getText();
     new Html("h2")
-      .class("mixer-controls-title")
+      .classOn("mixer-controls-title")
       .text(title)
       .appendTo(this.controlsPanel);
 
     const controlsContainer = new Html("div")
-      .class("mixer-controls-container")
+      .classOn("mixer-controls-container")
       .appendTo(this.controlsPanel);
 
     // Case 1: Mic Record Volume
@@ -169,13 +180,19 @@ const MixerUI = {
 
   _createSlider(container, name, paramDef, callback, paramIndex) {
     const controlEl = new Html("div")
-      .class("mixer-control")
+      .classOn("mixer-control")
+      .attr({ "data-param-index": paramIndex })
+      .on("click", () => {
+        this.activePanel = "controls";
+        this.selectedParamIndex = paramIndex;
+        this._updateListHighlight();
+        this._updateControlsHighlight();
+      })
       .appendTo(container);
-    controlEl.attr({ "data-param-index": paramIndex });
 
     const label = new Html("label").text(name).appendTo(controlEl);
     const sliderWrapper = new Html("div")
-      .class("mixer-slider-wrapper")
+      .classOn("mixer-slider-wrapper")
       .appendTo(controlEl);
     const slider = new Html("input")
       .attr({
@@ -187,7 +204,7 @@ const MixerUI = {
       })
       .appendTo(sliderWrapper);
     const valueDisplay = new Html("span")
-      .class("mixer-value-display")
+      .classOn("mixer-value-display")
       .appendTo(controlEl);
 
     const updateDisplay = (val) => {
@@ -838,10 +855,10 @@ const InfoBar = {
   persistentState: { label: "", content: "" },
 
   init(container) {
-    this.bar = new Html("div").class("info-bar").appendTo(container);
-    this.labelEl = new Html("div").class("info-bar-label").appendTo(this.bar);
+    this.bar = new Html("div").classOn("info-bar").appendTo(container);
+    this.labelEl = new Html("div").classOn("info-bar-label").appendTo(this.bar);
     this.contentEl = new Html("div")
-      .class("info-bar-content")
+      .classOn("info-bar-content")
       .appendTo(this.bar);
   },
 
@@ -919,10 +936,10 @@ const ScoreHUD = {
   hud: null,
   scoreDisplay: null,
   init(container) {
-    this.hud = new Html("div").class("score-hud").appendTo(container);
-    new Html("div").class("score-hud-label").text("SCORE").appendTo(this.hud);
+    this.hud = new Html("div").classOn("score-hud").appendTo(container);
+    new Html("div").classOn("score-hud-label").text("SCORE").appendTo(this.hud);
     this.scoreDisplay = new Html("div")
-      .class("score-hud-value")
+      .classOn("score-hud-value")
       .appendTo(this.hud);
     this.hide();
   },
@@ -945,7 +962,7 @@ const pkg = {
     FsSvc = Root.Processes.getService("FsSvc").data;
     Forte = Root.Processes.getService("ForteSvc").data;
 
-    wrapper = new Html("div").class("full-ui").appendTo("body");
+    wrapper = new Html("div").classOn("full-ui").appendTo("body");
     Ui.becomeTopUi(Pid, wrapper);
 
     console.log("[Encore] Preloading UI sound effects...");
@@ -961,10 +978,8 @@ const pkg = {
     const socket = io({ query: { clientType: "app" } });
     socket.on("connect", () => console.log("[LINK] Connected to server."));
 
-    // --- MODIFIED: Load vocal chain on startup ---
     console.log("[Encore] Loading default vocal chain...");
     try {
-      // NOTE: Ensure this path is correct for your project's file structure.
       const response = await fetch("/pkgs/chains/defaultVocalChain.json");
       if (!response.ok)
         throw new Error(`HTTP error! status: ${response.status}`);
@@ -975,7 +990,6 @@ const pkg = {
       console.error("[Encore] Could not load default vocal chain.", e);
       InfoBar.showTemp("ERROR", "Could not load vocal chain.", 5000);
     }
-    // --- END MODIFIED ---
 
     songList = FsSvc.getSongList();
     const songMap = new Map(songList.map((song) => [song.code, song]));
@@ -997,6 +1011,7 @@ const pkg = {
       currentSongIsMultiplexed: false,
       currentSongIsMV: false,
       isTransitioning: false,
+      isTypingNumber: false,
     };
 
     InfoBar.context = () => ({
@@ -1018,63 +1033,63 @@ const pkg = {
     }
 
     const bgvContainer = new Html("div")
-      .class("bgv-container")
+      .classOn("bgv-container")
       .appendTo(wrapper);
     const youtubePlayerContainer = new Html("div")
-      .class("youtube-player-container", "hidden")
+      .classOn("youtube-player-container", "hidden")
       .appendTo(wrapper);
     const youtubeIframe = new Html("iframe").appendTo(youtubePlayerContainer);
 
-    const overlay = new Html("div").class("overlay-ui").appendTo(wrapper);
-    const searchUi = new Html("div").class("search-ui").appendTo(wrapper);
+    const overlay = new Html("div").classOn("overlay-ui").appendTo(wrapper);
+    const searchUi = new Html("div").classOn("search-ui").appendTo(wrapper);
     const playerUi = new Html("div")
-      .class("player-ui", "hidden")
+      .classOn("player-ui", "hidden")
       .appendTo(wrapper);
 
     const postSongScoreScreen = new Html("div")
-      .class("post-song-score-screen")
+      .classOn("post-song-score-screen")
       .appendTo(wrapper);
     const scoreCard = new Html("div")
-      .class("score-card")
+      .classOn("score-card")
       .appendTo(postSongScoreScreen);
     const scoreHeader = new Html("div")
-      .class("score-header")
+      .classOn("score-header")
       .appendTo(scoreCard);
     new Html("div")
-      .class("score-header-title")
+      .classOn("score-header-title")
       .text("YOUR SCORE")
       .appendTo(scoreHeader);
     new Html("div")
-      .class("score-header-subtitle")
+      .classOn("score-header-subtitle")
       .text("ADVANCED SCORING")
       .appendTo(scoreHeader);
-    const scoreMain = new Html("div").class("score-main").appendTo(scoreCard);
+    const scoreMain = new Html("div").classOn("score-main").appendTo(scoreCard);
     const finalScoreContainer = new Html("div")
-      .class("final-score-container")
+      .classOn("final-score-container")
       .appendTo(scoreMain);
     new Html("div")
-      .class("final-score-label")
+      .classOn("final-score-label")
       .text("YOUR SCORE")
       .appendTo(finalScoreContainer);
     const finalScoreDisplay = new Html("div")
-      .class("final-score")
+      .classOn("final-score")
       .appendTo(finalScoreContainer);
     const scoreDetails = new Html("div")
-      .class("score-details")
+      .classOn("score-details")
       .appendTo(scoreCard);
     const createGauge = (label, className) => {
       const container = new Html("div")
-        .class("score-gauge-container")
+        .classOn("score-gauge-container")
         .appendTo(scoreDetails);
       new Html("span")
-        .class("score-gauge-label")
+        .classOn("score-gauge-label")
         .text(label)
         .appendTo(container);
       const gauge = new Html("div")
-        .class("score-gauge", className)
+        .classOn("score-gauge", className)
         .appendTo(container);
       const valueDisplay = new Html("span")
-        .class("score-gauge-value")
+        .classOn("score-gauge-value")
         .appendTo(gauge);
       return { gauge, valueDisplay };
     };
@@ -1086,12 +1101,10 @@ const pkg = {
     InfoBar.init(wrapper);
     ScoreHUD.init(wrapper);
 
-    // --- NEW: Initialize the Mixer UI ---
     MixerUI.init(wrapper);
-    // --- END NEW ---
 
     const calibrationScreen = new Html("div")
-      .class("calibration-screen")
+      .classOn("calibration-screen")
       .appendTo(wrapper);
     const calibrationTitle = new Html("h1").appendTo(calibrationScreen);
     const calibrationText = new Html("p").appendTo(calibrationScreen);
@@ -1107,42 +1120,59 @@ const pkg = {
         .qr-code-container img { width: 50px; height: 50px; }
         .qr-code-container p { margin: 0; font-family: 'Rajdhani', sans-serif; font-size: 0.9rem; color: rgba(255,255,255,0.7); }
         .mode-player .qr-code-container, .mode-yt-search .qr-code-container { display: none; }
-        .overlay-ui { display: flex; align-items: stretch; gap: 3rem; position: relative; width: 100%; height: 100%; padding: 2rem 3rem; background: linear-gradient(180deg, rgba(0,0,0,0.7) 0%, rgba(0,0,0,0.3) 20%, transparent 50%, rgba(0,0,0,0.9) 100%); transition: opacity 0.3s ease-out; z-index: 10; }
+        .overlay-ui { display: flex; flex-direction: column; align-items: center; gap: 1rem; position: relative; width: 100%; height: 100%; padding: 2rem 3rem; background: linear-gradient(180deg, rgba(0,0,0,0.7) 0%, rgba(0,0,0,0.3) 20%, transparent 50%, rgba(0,0,0,0.9) 100%); transition: opacity 0.3s ease-out; z-index: 10; }
         .hidden { opacity: 0; pointer-events: none; }
-        .left-panel { flex: 2; display: flex; flex-direction: column; align-items: center; justify-content: center; transition: opacity 0.3s ease-out; }
-        .right-panel { flex: 3; display: flex; flex-direction: column; background: rgba(10,10,20,0.7); border: 1px solid rgba(255,255,255,0.2); border-radius: 0.5rem; padding: 1.5rem; overflow: hidden; transition: opacity 0.3s ease-out; }
-        .main-content { text-align: center; color: white; text-shadow: 2px 2px 8px rgba(0,0,0,0.8); }
+        /* --- Main Menu Layout --- */
+        .main-content { text-align: center; color: white; text-shadow: 2px 2px 8px rgba(0,0,0,0.8); transition: opacity 0.3s ease-out; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 12; }
+        .mode-menu.is-typing .main-content { opacity: 1; pointer-events: all; }
+        .mode-menu:not(.is-typing) .main-content { opacity: 0; pointer-events: none; }
         .main-content h1 { font-size: 2rem; font-weight: 500; margin-bottom: 0.5rem; }
         .number-display { font-family: 'Rajdhani', sans-serif; font-size: 10rem; line-height: 1; font-weight: 700; border: 2px solid rgba(255,255,255,0.3); border-radius: 0.5rem; padding: 1rem 2rem; letter-spacing: 0.5rem; transition: all 0.2s ease; }
         .number-display.active { transform: scale(1.02); border-color: #89CFF0; box-shadow: 0 0 20px #89CFF066; }
         .song-info { margin-top: 1.5rem; height: 100px; } .song-title { font-size: 2.5rem; font-weight: bold; } .song-artist { font-size: 1.5rem; opacity: 0.8; }
-        .search-hint { margin-top: 1rem; font-size: 1.2rem; opacity: 0.5; font-family: 'Rajdhani', sans-serif; }
-        .right-panel h2 { margin: 0 0 1rem 0; text-align: center; }
-        .song-list-container { flex-grow: 1; overflow-y: auto; }
-        .song-item { display: flex; padding: 0.5rem; border-bottom: 1px solid rgba(255,255,255,0.1); transition: background-color 0.2s; } .song-item.highlighted { background-color: #89CFF044; }
-        .song-item-code { font-family: 'Rajdhani', sans-serif; font-weight: 700; width: 80px; color: #89CFF0; } .song-item-title { flex-grow: 1; } .song-item-artist { width: 30%; text-align: right; opacity: 0.7; }
+        .song-list-container { width: 90%; max-width: 1400px; height: 80vh; background: rgba(10,10,20,0.7); border: 1px solid rgba(255,255,255,0.2); border-radius: 0.5rem; padding: 1.5rem; overflow-y: auto; transition: opacity 0.3s ease-out; }
+        .mode-menu.is-typing .song-list-container { opacity: 0; pointer-events: none; }
+        .mode-menu:not(.is-typing) .song-list-container { opacity: 1; pointer-events: all; }
+        .song-item { display: flex; padding: 0.5rem; border-bottom: 1px solid rgba(255,255,255,0.1); transition: background-color 0.2s; cursor: pointer; font-family: 'Rajdhani', sans-serif; } .song-item.highlighted { background-color: #89CFF044; }
+        .song-item-code { font-weight: 700; width: 80px; color: #89CFF0; } .song-item-title { flex-grow: 1; } .song-item-artist { width: 30%; text-align: right; opacity: 0.7; }
+        /* --- MODIFIED: Song List Header Styles --- */
+        .song-list-header { display: flex; padding: 0.5rem; border-bottom: 2px solid rgba(137, 207, 240, 0.4); margin-bottom: 0.5rem; font-weight: 700; color: #FFD700; text-transform: uppercase; letter-spacing: 0.1em; position: sticky; top: -1.5rem; background: rgba(10,10,20,0.7); backdrop-filter: blur(5px); z-index: 1; font-family: 'Rajdhani', sans-serif; }
+        .song-header-code { width: 80px; color: #89CFF0; }
+        .song-header-title { flex-grow: 1; }
+        .song-header-artist { width: 30%; text-align: right; }
+        /* --- Bottom Actions Bar --- */
+        .bottom-actions { display: flex; gap: 1rem; margin-top: 1rem; }
+        .action-button { background: rgba(10,10,20,0.7); border: 1px solid rgba(255,255,255,0.2); border-radius: 0.5rem; color: white; padding: 0.75rem 1.5rem; font-family: 'Rajdhani', sans-serif; font-size: 1.2rem; font-weight: 600; cursor: pointer; transition: all 0.2s ease; }
+        .action-button:hover { background-color: #89CFF0; color: #010141; border-color: #89CFF0; }
+        .mode-menu.is-typing .bottom-actions { opacity: 0; pointer-events: none; }
+        /* --- Search UI Layout --- */
         .search-ui { position: absolute; display: flex; z-index: 20000000; opacity: 0; pointer-events: none; transition: opacity 0.3s ease-out; top: calc(2rem + 50px + 1rem); left: 0; right: 0; bottom: auto; align-items: flex-start; justify-content: center; }
         .mode-yt-search .search-ui, .search-overlay-active .search-ui { opacity: 1; pointer-events: all; z-index: 200000; }
         .mode-yt-search .search-ui { inset: 0; padding-top: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(10px); align-items: center; z-index: 2000000; }
+        .in-game-search-active .search-ui { inset: auto; top: 2rem; left: 3rem; right: 3rem; align-items: flex-start; }
+        .in-game-search-active .search-window { width: 100%; height: auto; max-height: 40vh; background: rgba(10, 10, 20, 0.9); box-shadow: 0 5px 15px rgba(0,0,0,0.3); }
+        .in-game-search-active .search-input { padding: 1rem; font-size: 1.5rem; }
+        .in-game-search-active .search-results-container { max-height: 30vh; }
         .mode-yt-search .search-window { width: 90%; max-width: 1200px; height: 80vh; background: rgba(10,10,20,0.8); gap: 1.5rem; padding: 1.5rem; }
         .search-window { border: 1px solid rgba(137, 207, 240, 0.4); border-radius: 0.5rem; display: flex; flex-direction: column; gap: 0; transition: height 0.25s ease-in-out, box-shadow 0.25s ease-in-out; overflow: hidden; z-index: 2000000; }
-        .search-overlay-active .search-window { background: rgba(10, 10, 20, 0.95); width: 60vw; max-width: 800px; height: auto; box-shadow: 0 5px 15px rgba(0,0,0,0.3); }
-        .search-overlay-active .search-input { padding: 1.2rem; }
-        .search-overlay-active .search-results-container { max-height: 0; overflow-y: auto; transition: max-height 0.25s ease-in-out; border-top: none; }
-        .search-overlay-active .search-window.has-results { box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
-        .search-overlay-active .search-window.has-results .search-results-container { max-height: 50vh; border-top: 1px solid rgba(255,255,255,0.2); padding: 1rem; }
+        .search-window .search-results-container { overflow-y: auto; transition: max-height 0.25s ease-in-out; border-top: none; }
+        .mode-yt-search .search-results-container { flex-grow: 1; min-height: 0; }
+        .search-window.has-results .search-results-container { max-height: none; border-top: 1px solid rgba(255,255,255,0.2); padding: 1rem; }
         .search-input { font-family: 'Rajdhani', sans-serif; font-size: 2rem; background: rgba(0,0,0,0.4); border: 2px solid rgba(255,255,255,0.3); border-radius: 0.5rem; color: white; width: 100%; text-align: center; outline: none; transition: all 0.2s ease; flex-shrink: 0; }
         .search-input:focus { border-color: #89CFF0; box-shadow: 0 0 20px #89CFF066; }
         .search-window:not(.has-results) .search-results-container { padding: 0; }
-        .search-result-item { display: flex; align-items: center; gap: 1rem; padding: 0.5rem; border-bottom: 1px solid rgba(255,255,255,0.1); transition: background-color 0.2s; }
+        .search-result-item { display: flex; align-items: center; gap: 1rem; padding: 0.5rem; border-bottom: 1px solid rgba(255,255,255,0.1); transition: background-color 0.2s; cursor: pointer; }
         .search-result-item:last-child { border-bottom: none; }
         .search-result-item.highlighted { background-color: #89CFF044; }
+        .search-result-local-code { font-family: 'Rajdhani', sans-serif; font-weight: 700; width: 80px; color: #89CFF0; flex-shrink: 0; }
         .search-thumbnail-wrapper { position: relative; }
         .search-thumbnail { width: 120px; height: 68px; object-fit: cover; border-radius: 0.25rem; flex-shrink: 0; }
         .search-duration { position: absolute; bottom: 0.2rem; right: 0.2rem; background: rgba(0,0,0,0.8); color: white; font-size: 0.8rem; padding: 0.1rem 0.3rem; border-radius: 0.2rem; }
-        .search-info { display: flex; flex-direction: column; overflow: hidden; }
+        .search-info { display: flex; flex-direction: column; overflow: hidden; flex-grow: 1; }
         .search-title { font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .search-channel { font-size: 0.9rem; opacity: 0.7; }
+        .search-youtube-badge { background: #FF5555; color: white; font-size: 0.8rem; font-weight: bold; padding: 0.1rem 0.4rem; border-radius: 0.2rem; margin-left: 0.5rem; }
+        /* Player UI Styles */
         .player-ui { position: absolute; inset: 0; padding: 2rem; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; transition: background 0.3s ease-out; background: linear-gradient(to top, rgba(0,0,0,0.9) 0%, transparent 50%); z-index: 15; padding-bottom: 5vh; }
         .mode-player-youtube .player-ui { background: transparent; }
         .player-bottom-section { width: 100%; max-width: 1200px; display: flex; flex-direction: column; align-items: center; gap: 1rem; }
@@ -1216,194 +1246,112 @@ const pkg = {
         .calibration-screen.visible { opacity: 1; pointer-events: all; }
         .calibration-screen h1 { font-size: 3rem; letter-spacing: 0.1em; color: #89CFF0; margin-bottom: 1rem; }
         .calibration-screen p { font-size: 1.5rem; opacity: 0.8; max-width: 60ch; }
-        /* --- NEW: Mixer UI Styles --- */
-        .mixer-modal {
-            position: absolute;
-            inset: 0;
-            background: rgba(0, 0, 0, 0.7);
-            backdrop-filter: blur(15px);
-            z-index: 10000;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            opacity: 0;
-            pointer-events: none;
-            transition: opacity 0.3s ease;
-            font-family: 'Rajdhani', sans-serif;
-            color: #FFF;
-        }
-        .mixer-modal.visible {
-            opacity: 1;
-            pointer-events: all;
-        }
-        .mixer-content {
-            width: 80vw;
-            height: 80vh;
-            max-width: 1200px;
-            background: rgba(10, 10, 20, 0.85);
-            border: 1px solid rgba(137, 207, 240, 0.4);
-            border-radius: 1rem;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
-        }
-        .mixer-header {
-            padding: 1rem 1.5rem;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.2);
-            flex-shrink: 0;
-        }
-        .mixer-header h1 {
-            margin: 0;
-            font-size: 1.8rem;
-            letter-spacing: 0.1em;
-            color: #89CFF0;
-        }
-        .mixer-header p {
-            margin: 0.25rem 0 0 0;
-            opacity: 0.6;
-            font-size: 0.9rem;
-        }
-        .mixer-main {
-            display: flex;
-            flex-grow: 1;
-            overflow: hidden;
-        }
-        .mixer-list-panel {
-            flex: 1;
-            border-right: 1px solid rgba(255, 255, 255, 0.2);
-            overflow-y: auto;
-            padding: 0.5rem 0;
-        }
-        .mixer-item {
-            padding: 0.75rem 1.5rem;
-            font-size: 1.2rem;
-            font-weight: 600;
-            cursor: default;
-            border-left: 4px solid transparent;
-            transition: background-color 0.2s ease, border-color 0.2s ease;
-        }
-        .mixer-item--active {
-            background-color: rgba(137, 207, 240, 0.2);
-            border-left-color: #89CFF0;
-        }
-        .mixer-controls-panel {
-            flex: 3;
-            padding: 1rem 1.5rem;
-            overflow-y: auto;
-        }
-        .mixer-controls-title {
-            margin: 0 0 1.5rem 0;
-            font-size: 1.5rem;
-            color: #FFD700;
-            border-bottom: 1px solid rgba(255,255,255,0.1);
-            padding-bottom: 0.75rem;
-        }
-        .mixer-controls-container {
-            display: flex;
-            flex-direction: column;
-            gap: 1.25rem;
-        }
-        .mixer-control {
-            display: grid;
-            grid-template-columns: 200px 1fr 100px;
-            align-items: center;
-            gap: 1rem;
-            padding: 0.5rem;
-            border-radius: 0.25rem;
-            transition: background-color 0.2s ease;
-        }
-        .mixer-control--active {
-            background-color: rgba(137, 207, 240, 0.1);
-        }
-        .mixer-control label {
-            font-weight: 500;
-            text-transform: capitalize;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-        .mixer-value-display {
-            font-weight: 700;
-            font-size: 1.1rem;
-            text-align: right;
-            color: #89CFF0;
-        }
-        .mixer-slider-wrapper {
-            width: 100%;
-        }
-        input[type=range] { /* Style the slider */
-            -webkit-appearance: none;
-            width: 100%;
-            height: 8px;
-            background: rgba(0,0,0,0.5);
-            border-radius: 4px;
-            border: 1px solid rgba(255,255,255,0.2);
-            outline: none;
-        }
-        input[type=range]::-webkit-slider-thumb {
-            -webkit-appearance: none;
-            appearance: none;
-            width: 20px;
-            height: 20px;
-            background: #89CFF0;
-            border-radius: 50%;
-            cursor: pointer;
-            border: 2px solid #010141;
-        }
-        input[type=range]::-moz-range-thumb {
-            width: 20px;
-            height: 20px;
-            background: #89CFF0;
-            border-radius: 50%;
-            cursor: pointer;
-            border: 2px solid #010141;
-        }
-        /* --- END NEW --- */
+        /* Mixer UI Styles */
+        .mixer-modal { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.7); backdrop-filter: blur(15px); z-index: 10000; display: flex; align-items: center; justify-content: center; opacity: 0; pointer-events: none; transition: opacity 0.3s ease; font-family: 'Rajdhani', sans-serif; color: #FFF; }
+        .mixer-modal.visible { opacity: 1; pointer-events: all; }
+        .mixer-content { width: 80vw; height: 80vh; max-width: 1200px; background: rgba(10, 10, 20, 0.85); border: 1px solid rgba(137, 207, 240, 0.4); border-radius: 1rem; box-shadow: 0 10px 30px rgba(0,0,0,0.5); display: flex; flex-direction: column; overflow: hidden; }
+        .mixer-header { padding: 1rem 1.5rem; border-bottom: 1px solid rgba(255, 255, 255, 0.2); flex-shrink: 0; }
+        .mixer-header h1 { margin: 0; font-size: 1.8rem; letter-spacing: 0.1em; color: #89CFF0; }
+        .mixer-header p { margin: 0.25rem 0 0 0; opacity: 0.6; font-size: 0.9rem; }
+        .mixer-main { display: flex; flex-grow: 1; overflow: hidden; }
+        .mixer-list-panel { flex: 1; border-right: 1px solid rgba(255, 255, 255, 0.2); overflow-y: auto; padding: 0.5rem 0; }
+        .mixer-item { padding: 0.75rem 1.5rem; font-size: 1.2rem; font-weight: 600; cursor: pointer; border-left: 4px solid transparent; transition: background-color 0.2s ease, border-color 0.2s ease; }
+        .mixer-item--active { background-color: rgba(137, 207, 240, 0.2); border-left-color: #89CFF0; }
+        .mixer-controls-panel { flex: 3; padding: 1rem 1.5rem; overflow-y: auto; }
+        .mixer-controls-title { margin: 0 0 1.5rem 0; font-size: 1.5rem; color: #FFD700; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 0.75rem; }
+        .mixer-controls-container { display: flex; flex-direction: column; gap: 1.25rem; }
+        .mixer-control { display: grid; grid-template-columns: 200px 1fr 100px; align-items: center; gap: 1rem; padding: 0.5rem; border-radius: 0.25rem; transition: background-color 0.2s ease; cursor: pointer; }
+        .mixer-control--active { background-color: rgba(137, 207, 240, 0.1); }
+        .mixer-control label { font-weight: 500; text-transform: capitalize; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .mixer-value-display { font-weight: 700; font-size: 1.1rem; text-align: right; color: #89CFF0; }
+        .mixer-slider-wrapper { width: 100%; }
+        input[type=range] { -webkit-appearance: none; width: 100%; height: 8px; background: rgba(0,0,0,0.5); border-radius: 4px; border: 1px solid rgba(255,255,255,0.2); outline: none; }
+        input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 20px; height: 20px; background: #89CFF0; border-radius: 50%; cursor: pointer; border: 2px solid #010141; }
+        input[type=range]::-moz-range-thumb { width: 20px; height: 20px; background: #89CFF0; border-radius: 50%; cursor: pointer; border: 2px solid #010141; }
     `,
       )
       .appendTo(wrapper);
 
     wrapper.classOn("loading");
-    const leftPanel = new Html("div").class("left-panel").appendTo(overlay);
-    const rightPanel = new Html("div").class("right-panel").appendTo(overlay);
+
     const mainContent = new Html("div")
-      .class("main-content")
-      .appendTo(leftPanel);
+      .classOn("main-content")
+      .appendTo(overlay);
     new Html("h1").text("Enter Song Number").appendTo(mainContent);
     const numberDisplay = new Html("div")
-      .class("number-display")
+      .classOn("number-display")
       .appendTo(mainContent);
-    const songInfo = new Html("div").class("song-info").appendTo(mainContent);
-    const songTitle = new Html("h2").class("song-title").appendTo(songInfo);
-    const songArtist = new Html("p").class("song-artist").appendTo(songInfo);
-    // --- MODIFIED: Added Mixer hint ---
-    new Html("p")
-      .class("search-hint")
-      .html(
-        "Press 'Y' to Search YouTube<br>Press 'C' to Calibrate Audio<br>Press 'M' for Mic/Music Setup",
-      )
-      .appendTo(mainContent);
-    // --- END MODIFIED ---
-    new Html("h2").text("Song List").appendTo(rightPanel);
+    const songInfo = new Html("div").classOn("song-info").appendTo(mainContent);
+    const songTitle = new Html("h2").classOn("song-title").appendTo(songInfo);
+    const songArtist = new Html("p").classOn("song-artist").appendTo(songInfo);
+
     const songListContainer = new Html("div")
-      .class("song-list-container")
-      .appendTo(rightPanel);
-    songList.forEach((song) => {
+      .classOn("song-list-container")
+      .appendTo(overlay);
+
+    const listHeader = new Html("div")
+      .classOn("song-list-header")
+      .appendTo(songListContainer);
+    new Html("div")
+      .classOn("song-header-code")
+      .text("CODE")
+      .appendTo(listHeader);
+    new Html("div")
+      .classOn("song-header-title")
+      .text("TITLE")
+      .appendTo(listHeader);
+    new Html("div")
+      .classOn("song-header-artist")
+      .text("ARTIST")
+      .appendTo(listHeader);
+
+    songList.forEach((song, index) => {
       const item = new Html("div")
-        .class("song-item")
+        .classOn("song-item")
         .appendTo(songListContainer);
-      new Html("div").class("song-item-code").text(song.code).appendTo(item);
-      new Html("div").class("song-item-title").text(song.title).appendTo(item);
+      new Html("div").classOn("song-item-code").text(song.code).appendTo(item);
       new Html("div")
-        .class("song-item-artist")
+        .classOn("song-item-title")
+        .text(song.title)
+        .appendTo(item);
+      new Html("div")
+        .classOn("song-item-artist")
         .text(song.artist)
         .appendTo(item);
+
+      item.on("click", () => {
+        startPlayer(song);
+      });
+      item.on("mouseover", () => {
+        if (state.mode !== "menu" || state.isTypingNumber) return;
+        state.highlightedIndex = index;
+        updateMenuUI();
+      });
+
       songItemElements.push(item);
     });
 
+    const bottomActions = new Html("div")
+      .classOn("bottom-actions")
+      .appendTo(overlay);
+    new Html("div")
+      .classOn("action-button")
+      .text("Search (Y)")
+      .on("click", () => setMode("yt-search"))
+      .appendTo(bottomActions);
+    new Html("div")
+      .classOn("action-button")
+      .text("Calibrate Audio (C)")
+      .on("click", runCalibrationSequence)
+      .appendTo(bottomActions);
+    new Html("div")
+      .classOn("action-button")
+      .text("Mic/Music Setup (M)")
+      .on("click", () => MixerUI.toggle())
+      .appendTo(bottomActions);
+
     const qrContainer = new Html("div")
-      .class("qr-code-container")
+      .classOn("qr-code-container")
       .appendTo(wrapper);
     const qrImg = new Html("img").appendTo(qrContainer);
     new Html("p").text("Use your phone as a remote!").appendTo(qrContainer);
@@ -1421,56 +1369,56 @@ const pkg = {
     }
 
     const searchWindow = new Html("div")
-      .class("search-window")
+      .classOn("search-window")
       .appendTo(searchUi);
     const searchInput = new Html("input")
-      .class("search-input")
+      .classOn("search-input")
       .attr({
         type: "text",
-        placeholder: "Type here and press Enter to search...",
+        placeholder: "Type here to search...",
       })
       .appendTo(searchWindow);
     const searchResultsContainer = new Html("div")
-      .class("search-results-container")
+      .classOn("search-results-container")
       .appendTo(searchWindow);
 
-    const introCard = new Html("div").class("intro-card").appendTo(playerUi);
+    const introCard = new Html("div").classOn("intro-card").appendTo(playerUi);
     const introCardTitle = new Html("div")
-      .class("intro-card-title")
+      .classOn("intro-card-title")
       .appendTo(introCard);
     const introCardArtist = new Html("div")
-      .class("intro-card-artist")
+      .classOn("intro-card-artist")
       .appendTo(introCard);
 
     const bottomSection = new Html("div")
-      .class("player-bottom-section")
+      .classOn("player-bottom-section")
       .appendTo(playerUi);
     const countdownDisplay = new Html("div")
-      .class("countdown-display")
+      .classOn("countdown-display")
       .appendTo(bottomSection);
     const lrcLyricsContainer = new Html("div")
-      .class("lyrics-container")
+      .classOn("lyrics-container")
       .appendTo(bottomSection);
     const lrcLineDisplay1 = new Html("div")
-      .class("lyric-line")
+      .classOn("lyric-line")
       .appendTo(lrcLyricsContainer);
     const lrcLineDisplay2 = new Html("div")
-      .class("lyric-line", "next")
+      .classOn("lyric-line", "next")
       .appendTo(lrcLyricsContainer);
     const midiLyricsContainer = new Html("div")
-      .class("midi-lyrics-container")
+      .classOn("midi-lyrics-container")
       .appendTo(bottomSection);
     const midiLineDisplay1 = new Html("div")
-      .class("lyric-line", "midi-lyric-line")
+      .classOn("lyric-line", "midi-lyric-line")
       .appendTo(midiLyricsContainer);
     const midiLineDisplay2 = new Html("div")
-      .class("lyric-line", "midi-lyric-line", "next")
+      .classOn("lyric-line", "midi-lyric-line", "next")
       .appendTo(midiLyricsContainer);
     const playerProgress = new Html("div")
-      .class("player-progress")
+      .classOn("player-progress")
       .appendTo(bottomSection);
     const progressBar = new Html("div")
-      .class("progress-bar")
+      .classOn("progress-bar")
       .appendTo(playerProgress);
 
     let countdownTimers = [];
@@ -1595,11 +1543,14 @@ const pkg = {
       if (visible) {
         state.isSearchOverlayVisible = true;
         wrapper.classOn("search-overlay-active");
+        if (state.mode === "player") {
+          wrapper.classOn("in-game-search-active");
+        }
         searchInput.elm.focus();
         searchInput.elm.select();
       } else {
         state.isSearchOverlayVisible = false;
-        wrapper.classOff("search-overlay-active");
+        wrapper.classOff("search-overlay-active", "in-game-search-active");
         searchWindow.classOff("has-results");
         searchInput.elm.blur();
         setTimeout(() => {
@@ -1652,7 +1603,7 @@ const pkg = {
     const renderSearchResults = () => {
       searchResultsContainer.clear();
       state.highlightedSearchIndex = -1;
-      if (state.isSearching) {
+      if (state.isSearching && state.searchResults.length === 0) {
         searchResultsContainer.text("Searching...");
         searchWindow.classOff("has-results");
         return;
@@ -1663,34 +1614,78 @@ const pkg = {
         return;
       }
       searchWindow.classOn("has-results");
-      state.searchResults.forEach((result) => {
+
+      state.searchResults.forEach((result, index) => {
         const item = new Html("div")
-          .class("search-result-item")
+          .classOn("search-result-item")
           .appendTo(searchResultsContainer);
-        const thumbWrapper = new Html("div")
-          .class("search-thumbnail-wrapper")
-          .appendTo(item);
-        new Html("img")
-          .class("search-thumbnail")
-          .attr({ src: result.thumbnail.thumbnails[0].url })
-          .appendTo(thumbWrapper);
-        if (result.length && result.length.simpleText) {
-          new Html("span")
-            .class("search-duration")
-            .text(result.length.simpleText)
+
+        item.on("click", () => {
+          state.highlightedSearchIndex = index;
+          handleEnter();
+        });
+        item.on("mouseover", () => {
+          state.highlightedSearchIndex = index;
+          updateSearchHighlight();
+        });
+
+        const info = new Html("div").classOn("search-info").appendTo(item);
+
+        if (result.type === "local") {
+          new Html("div")
+            .classOn("search-result-local-code")
+            .text(result.code)
+            .appendTo(item);
+          new Html("div")
+            .classOn("search-title")
+            .text(result.title)
+            .appendTo(info);
+          new Html("div")
+            .classOn("search-channel")
+            .text(result.artist)
+            .appendTo(info);
+        } else {
+          // YouTube result
+          const thumbWrapper = new Html("div")
+            .classOn("search-thumbnail-wrapper")
+            .appendTo(item);
+          new Html("img")
+            .classOn("search-thumbnail")
+            .attr({ src: result.thumbnail.thumbnails[0].url })
             .appendTo(thumbWrapper);
+          if (result.length && result.length.simpleText) {
+            new Html("span")
+              .classOn("search-duration")
+              .text(result.length.simpleText)
+              .appendTo(thumbWrapper);
+          }
+          const titleContainer = new Html("div")
+            .styleJs({ display: "flex", alignItems: "center" })
+            .appendTo(info);
+          new Html("div")
+            .classOn("search-title")
+            .text(result.title)
+            .appendTo(titleContainer);
+          new Html("span")
+            .classOn("search-youtube-badge")
+            .text("YT")
+            .appendTo(titleContainer);
+          new Html("div")
+            .classOn("search-channel")
+            .text(result.channelTitle)
+            .appendTo(info);
         }
-        const info = new Html("div").class("search-info").appendTo(item);
-        new Html("div").class("search-title").text(result.title).appendTo(info);
-        new Html("div")
-          .class("search-channel")
-          .text(result.channelTitle)
-          .appendTo(info);
       });
       updateSearchHighlight();
     };
 
     const updateMenuUI = () => {
+      if (state.isTypingNumber) {
+        wrapper.classOn("is-typing");
+      } else {
+        wrapper.classOff("is-typing");
+      }
+
       let activeSong = null;
       let displayCode = state.songNumber.padStart(maxLength, "0");
       if (state.songNumber.length > 0) {
@@ -1715,7 +1710,14 @@ const pkg = {
       songItemElements.forEach((item, index) => {
         if (index === state.highlightedIndex) {
           item.classOn("highlighted");
-          item.elm.scrollIntoView({ block: "nearest" });
+          // --- MODIFIED: Fix scrolling to top item with arrow keys ---
+          if (!state.isTypingNumber) {
+            if (state.highlightedIndex === 0) {
+              songListContainer.elm.scrollTop = 0;
+            } else {
+              item.elm.scrollIntoView({ block: "nearest" });
+            }
+          }
         } else {
           item.classOff("highlighted");
         }
@@ -1736,29 +1738,53 @@ const pkg = {
     };
 
     const performSearch = async () => {
-      const query = searchInput.getValue().trim();
+      const query = searchInput.getValue().trim().toLowerCase();
       if (!query) {
         state.searchResults = [];
         renderSearchResults();
         return;
       }
       state.isSearching = true;
-      state.searchResults = [];
+
+      let localResults = [];
+      if (state.mode === "player" || state.mode === "yt-search") {
+        if (/^\d+$/.test(query)) {
+          songList.forEach((song) => {
+            if (song.code.includes(query)) {
+              localResults.push({ ...song, type: "local" });
+            }
+          });
+        }
+        songList.forEach((song) => {
+          if (
+            song.title.toLowerCase().includes(query) ||
+            song.artist.toLowerCase().includes(query)
+          ) {
+            if (!localResults.find((s) => s.code === song.code)) {
+              localResults.push({ ...song, type: "local" });
+            }
+          }
+        });
+      }
+      state.searchResults = [...localResults];
       renderSearchResults();
+
       try {
         const response = await fetch(
           `http://127.0.0.1:9864/yt-search?q=${encodeURIComponent(query)}`,
         );
         if (!response.ok) throw new Error("Search request failed");
         const data = await response.json();
-        const items = data.items || [];
-        state.searchResults = items.filter((item) => item.type === "video");
+        const ytItems = (data.items || [])
+          .filter((item) => item.type === "video")
+          .map((item) => ({ ...item, type: "youtube" }));
+
+        state.searchResults = [...localResults, ...ytItems];
+        renderSearchResults();
       } catch (error) {
         console.error("YouTube search failed:", error);
-        state.searchResults = [];
       } finally {
         state.isSearching = false;
-        renderSearchResults();
       }
     };
 
@@ -1927,17 +1953,17 @@ const pkg = {
             if (!lineData) return;
             lineData.forEach((s) => {
               const container = new Html("div")
-                .class("lyric-syllable-container")
+                .classOn("lyric-syllable-container")
                 .attr({ "data-index": s.globalIndex })
                 .appendTo(displayEl);
               new Html("span")
-                .class("lyric-syllable-original")
+                .classOn("lyric-syllable-original")
                 .attr({ "data-text": s.text })
                 .text(s.text)
                 .appendTo(container);
               if (s.romanized) {
                 new Html("span")
-                  .class("lyric-syllable-romanized")
+                  .classOn("lyric-syllable-romanized")
                   .attr({ "data-text": s.romanized })
                   .text(s.romanized)
                   .appendTo(container);
@@ -2021,12 +2047,12 @@ const pkg = {
               displayEl.clear();
               if (!lineData) return;
               new Html("div")
-                .class("lyric-line-original")
+                .classOn("lyric-line-original")
                 .text(lineData.text)
                 .appendTo(displayEl);
               if (lineData.romanized) {
                 new Html("div")
-                  .class("lyric-line-romanized")
+                  .classOn("lyric-line-romanized")
                   .text(lineData.romanized)
                   .appendTo(displayEl);
               }
@@ -2080,12 +2106,12 @@ const pkg = {
               displayEl.clear();
               if (!lineData) return;
               new Html("div")
-                .class("lyric-line-original")
+                .classOn("lyric-line-original")
                 .text(lineData.text)
                 .appendTo(displayEl);
               if (lineData.romanized) {
                 new Html("div")
-                  .class("lyric-line-romanized")
+                  .classOn("lyric-line-romanized")
                   .text(lineData.romanized)
                   .appendTo(displayEl);
               }
@@ -2178,6 +2204,7 @@ const pkg = {
       if (songToPlay) {
         state.songNumber = "";
         state.highlightedIndex = -1;
+        state.isTypingNumber = false;
         startPlayer(songToPlay);
       }
     };
@@ -2189,6 +2216,7 @@ const pkg = {
         state[target].length >= maxLength ? digit : state[target] + digit;
       if (state.mode !== "player") {
         Forte.playSfx(`/assets/audio/numbers/${digit}.wav`);
+        state.isTypingNumber = true;
       }
       if (state.mode === "player") {
         InfoBar.showReservation(state[target]);
@@ -2212,6 +2240,9 @@ const pkg = {
       } else if (state.mode === "menu") {
         if (state.songNumber.length > 0) {
           state.songNumber = state.songNumber.slice(0, -1);
+          if (state.songNumber.length === 0) {
+            state.isTypingNumber = false;
+          }
           updateMenuUI();
         }
       } else if (
@@ -2233,17 +2264,28 @@ const pkg = {
       } else if (state.mode === "player") {
         if (state.isSearchOverlayVisible) {
           if (state.highlightedSearchIndex !== -1) {
-            const video = state.searchResults[state.highlightedSearchIndex];
-            if (video) {
-              const songToReserve = {
-                title: video.title,
-                artist: video.channelTitle,
-                path: `yt://${video.id}`,
-              };
+            const result = state.searchResults[state.highlightedSearchIndex];
+            if (result) {
+              let songToReserve;
+              if (result.type === "local") {
+                songToReserve = { ...result };
+              } else {
+                // YouTube
+                songToReserve = {
+                  title: result.title,
+                  artist: result.channelTitle,
+                  path: `yt://${result.id}`,
+                };
+              }
+
               state.reservationQueue.push(songToReserve);
+              const codeSpan = songToReserve.code
+                ? `<span class="info-bar-code">${songToReserve.code}</span>`
+                : `<span class="info-bar-code is-youtube">YT</span>`;
+
               InfoBar.showTemp(
                 "RESERVED",
-                `<span class="info-bar-code is-youtube">YT</span> ${songToReserve.title}`,
+                `${codeSpan} ${songToReserve.title}`,
                 4000,
               );
               toggleSearchOverlay(false);
@@ -2262,13 +2304,19 @@ const pkg = {
         }
       } else if (state.mode === "yt-search") {
         if (state.highlightedSearchIndex !== -1) {
-          const video = state.searchResults[state.highlightedSearchIndex];
-          if (video) {
-            const songToPlay = {
-              title: video.title,
-              artist: video.channelTitle,
-              path: `yt://${video.id}`,
-            };
+          const result = state.searchResults[state.highlightedSearchIndex];
+          if (result) {
+            let songToPlay;
+            if (result.type === "local") {
+              songToPlay = { ...result };
+            } else {
+              // YouTube
+              songToPlay = {
+                title: result.title,
+                artist: result.channelTitle,
+                path: `yt://${result.id}`,
+              };
+            }
             startPlayer(songToPlay);
           }
         }
@@ -2279,6 +2327,12 @@ const pkg = {
       if (state.isTransitioning) return;
       if (state.isSearchOverlayVisible) {
         toggleSearchOverlay(false);
+        return;
+      }
+      if (state.mode === "menu" && state.isTypingNumber) {
+        state.songNumber = "";
+        state.isTypingNumber = false;
+        updateMenuUI();
         return;
       }
       if (state.mode === "player" || state.mode === "mode-player-youtube") {
@@ -2374,7 +2428,10 @@ const pkg = {
     const handleMenuNav = (direction) => {
       if (state.mode !== "menu") return;
       const change = direction === "down" ? 1 : -1;
-      state.songNumber = "";
+      if (state.songNumber.length > 0) {
+        state.songNumber = "";
+        state.isTypingNumber = false;
+      }
       let newIndex = state.highlightedIndex;
       if (change > 0)
         newIndex = Math.min(
@@ -2414,12 +2471,10 @@ const pkg = {
     };
 
     keydownHandler = (e) => {
-      // --- NEW: Intercept keys if Mixer UI is visible ---
       if (MixerUI.isVisible) {
         MixerUI.handleKeyDown(e);
         return;
       }
-      // --- END NEW ---
 
       const isSearchInputFocused = document.activeElement === searchInput.elm;
       if (isSearchInputFocused) {
@@ -2437,12 +2492,10 @@ const pkg = {
         e.preventDefault();
       }
 
-      // --- NEW: Handle Mixer toggle ---
       if (e.key.toLowerCase() === "m") {
         MixerUI.toggle();
         return;
       }
-      // --- END NEW ---
 
       if (e.key.toLowerCase() === "r") {
         if (state.mode === "player" && !state.currentSongIsYouTube) {
