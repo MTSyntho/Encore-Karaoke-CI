@@ -522,6 +522,38 @@ app.whenReady().then(() => {
     res.send(await kuroshiro.convert(req.query.t, { to: "romaji" }));
   });
 
+  // Add authentication routes
+  server.post("/auth/create-hash", (req, res) => {
+    const { password } = req.body;
+    if (!password) {
+      return res.status(400).json({ error: "Password is required" });
+    }
+
+    const salt = crypto.randomBytes(16).toString("hex");
+    const hash = crypto
+      .createHash("sha256")
+      .update(password + salt)
+      .digest("hex");
+
+    res.json({ salt, hash });
+  });
+
+  server.post("/auth/verify-hash", (req, res) => {
+    const { password, salt, hash } = req.body;
+    if (!password || !salt || !hash) {
+      return res
+        .status(400)
+        .json({ error: "Password, salt and hash are required" });
+    }
+
+    const computedHash = crypto
+      .createHash("sha256")
+      .update(password + salt)
+      .digest("hex");
+
+    res.json({ valid: computedHash === hash });
+  });
+
   server.use(express.static("public"));
   serverHttp.listen(port, () => {
     console.log(`[SERVER] Encore Karaoke server listening on port ${port}`);
