@@ -624,10 +624,10 @@ class EncoreController {
 
     // Reset Visuals
     this.dom.countdownDisplay.classOff("visible").text("");
-    this.dom.lrcLineDisplay1.clear();
-    this.dom.lrcLineDisplay2.clear();
-    this.dom.midiLineDisplay1.clear();
-    this.dom.midiLineDisplay2.clear();
+    this.dom.lrcLineDisplay1.clear().classOff("active", "next");
+    this.dom.lrcLineDisplay2.clear().classOff("active", "next");
+    this.dom.midiLineDisplay1.clear().classOff("active", "next");
+    this.dom.midiLineDisplay2.clear().classOff("active", "next");
     this.scoreHud.hide();
     this.dom.introCard.classOff("visible");
 
@@ -1181,7 +1181,7 @@ class EncoreController {
       this.state.isTypingNumber = true;
       this.updateMenuUI();
     } else {
-      this.infoBar.showReservation(this.state.reservationNumber);
+      this._updateReservationUI(false);
     }
   }
 
@@ -1190,9 +1190,12 @@ class EncoreController {
       this.toggleSearchOverlay(false);
     else if (this.state.mode === "player" && this.state.reservationNumber) {
       this.state.reservationNumber = this.state.reservationNumber.slice(0, -1);
-      this.state.reservationNumber
-        ? this.infoBar.showReservation(this.state.reservationNumber)
-        : this.infoBar.showDefault();
+      if (this.state.reservationNumber.length === 0) {
+        this.infoBar.showDefault();
+        this._updateReservationUI(true);
+      } else {
+        this._updateReservationUI(false);
+      }
     } else if (this.state.mode === "menu" && this.state.songNumber) {
       this.state.songNumber = this.state.songNumber.slice(0, -1);
       if (!this.state.songNumber) this.state.isTypingNumber = false;
@@ -1202,6 +1205,31 @@ class EncoreController {
       !this.dom.searchInput.getValue()
     )
       this.setMode("menu");
+  }
+
+  _updateReservationUI(isTemp) {
+    const displayCode = this.state.reservationNumber.padStart(5, "0");
+    const song = this.songMap.get(displayCode);
+    let songInfo = song
+      ? `<span class="info-bar-title">${song.title}</span><span class="info-bar-artist">- ${song.artist}</span>`
+      : this.state.reservationNumber.length === 5
+      ? `<span style="opacity: 0.5;">No song found.</span>`
+      : "";
+    const content = `<span class="info-bar-code">${displayCode}</span> ${songInfo}`;
+
+    if (isTemp) {
+      this.infoBar.showTemp("RESERVING", content, 3000);
+    } else {
+      if (this.infoBar.isTempVisible) {
+        this.infoBar.isTempVisible = false;
+        if (this.infoBar.timeout) {
+          clearTimeout(this.infoBar.timeout);
+          this.infoBar.timeout = null;
+        }
+        this.infoBar.bar.classOff("temp-visible");
+      }
+      this.infoBar.show("RESERVING", content);
+    }
   }
 
   handleEnter() {
