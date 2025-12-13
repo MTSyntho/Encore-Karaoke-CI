@@ -96,6 +96,9 @@ class EncoreController {
     // Load Songs
     this.songList = this.FsSvc.getSongList();
     this.songMap = new Map(this.songList.map((s) => [s.code, s]));
+    this.socket.emit("broadcastData", {
+      type: "ready",
+    });
 
     window.desktopIntegration.ipc.send("setRPC", {
       details: `Browsing ${this.songList.length} Songs...`,
