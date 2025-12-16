@@ -37,6 +37,9 @@ class EncoreController {
       isTransitioning: false,
       isTypingNumber: false,
       lastPlaybackStatus: null,
+      // NEW: State to track score screen
+      isScoreScreenActive: false,
+      scoreSkipResolver: null,
     };
 
     // --- Instantiate Modules ---
@@ -338,50 +341,159 @@ class EncoreController {
   }
 
   buildPostSongScreen() {
+    // Inject Styles: Using SVG strokes for gauges now instead of conic-gradient for reliability
+    if (!document.getElementById("encore-score-styles")) {
+      const style = document.createElement("style");
+      style.id = "encore-score-styles";
+      style.innerHTML = `
+            @import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;700&family=Radio+Canada:wght@400;500&display=swap');
+            
+            .post-song-screen-overlay {
+                position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+                background: linear-gradient(180deg, rgba(8, 8, 12, 0.98) 0%, rgba(2, 2, 5, 0.99) 100%);
+                display: flex; flex-direction: column; align-items: center; justify-content: center;
+                z-index: 1000; opacity: 0; pointer-events: none; transition: opacity 0.4s ease;
+                font-family: 'Radio Canada', sans-serif; color: white;
+            }
+            .score-title-text {
+                font-family: 'Rajdhani', sans-serif; font-size: 3.5rem; text-transform: uppercase;
+                letter-spacing: 8px; color: rgba(255,255,255,0.6); margin-bottom: 2vh; font-weight: 700;
+            }
+            .score-main-group {
+                display: flex; flex-direction: column; align-items: center; justify-content: center;
+                margin-bottom: 6vh;
+            }
+            .score-display-number {
+                font-family: 'Rajdhani', sans-serif; font-size: 16rem; font-weight: 700;
+                line-height: 0.9; color: #fff; text-shadow: 0 0 40px rgba(255,255,255,0.2);
+            }
+            .rank-display-text {
+                font-family: 'Rajdhani', sans-serif; font-size: 6rem; font-weight: 700;
+                margin-top: 10px; text-transform: uppercase; letter-spacing: 5px;
+            }
+            
+            .score-details-grid {
+                display: flex; gap: 6vw; justify-content: center; width: 90%; max-width: 1400px;
+            }
+            .gauge-wrapper {
+                display: flex; flex-direction: column; align-items: center; gap: 20px;
+            }
+            .gauge-svg-container {
+                position: relative; width: 160px; height: 160px;
+            }
+            .gauge-svg {
+                transform: rotate(-90deg); width: 100%; height: 100%;
+            }
+            .gauge-bg-circle {
+                fill: none; stroke: rgba(255,255,255,0.1); stroke-width: 8;
+            }
+            .gauge-fill-circle {
+                fill: none; stroke: var(--g-color); stroke-width: 8; stroke-linecap: round;
+                stroke-dasharray: 283; /* 2 * PI * 45 */
+                stroke-dashoffset: 283;
+                transition: stroke-dashoffset 0.1s linear;
+            }
+            .gauge-value-text {
+                position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+                font-family: 'Rajdhani', sans-serif; font-size: 3rem; font-weight: 700; color: #fff;
+            }
+            .gauge-label {
+                font-family: 'Rajdhani', sans-serif; font-size: 1.4rem; text-transform: uppercase;
+                letter-spacing: 2px; color: rgba(255,255,255,0.5); font-weight: 600;
+            }
+            .score-skip-hint {
+                position: absolute; bottom: 50px; font-family: 'Radio Canada', sans-serif;
+                font-size: 1rem; color: rgba(255,255,255,0.3); text-transform: uppercase;
+                letter-spacing: 3px; animation: blink-hint 2s infinite;
+            }
+            @keyframes blink-hint { 0%, 100% { opacity: 0.3; } 50% { opacity: 0.7; } }
+        `;
+      document.head.appendChild(style);
+    }
+
     this.dom.postSongScreen = new Html("div")
-      .classOn("post-song-score-screen")
+      .classOn("post-song-screen-overlay")
       .appendTo(this.wrapper);
-    const card = new Html("div")
-      .classOn("score-card")
+
+    // Title
+    new Html("div")
+      .classOn("score-title-text")
+      .text("YOUR SCORE")
       .appendTo(this.dom.postSongScreen);
-    const head = new Html("div").classOn("score-header").appendTo(card);
-    new Html("div")
-      .classOn("score-header-title")
-      .text("YOUR SCORE")
-      .appendTo(head);
-    new Html("div")
-      .classOn("score-header-subtitle")
-      .text("ADVANCED SCORING")
-      .appendTo(head);
 
-    const main = new Html("div").classOn("score-main").appendTo(card);
-    const final = new Html("div")
-      .classOn("final-score-container")
-      .appendTo(main);
-    new Html("div")
-      .classOn("final-score-label")
-      .text("YOUR SCORE")
-      .appendTo(final);
+    // Main Group: Score on top, Rank below
+    const mainGroup = new Html("div")
+      .classOn("score-main-group")
+      .appendTo(this.dom.postSongScreen);
     this.dom.finalScoreDisplay = new Html("div")
-      .classOn("final-score")
-      .appendTo(final);
+      .classOn("score-display-number")
+      .text("00")
+      .appendTo(mainGroup);
+    this.dom.rankDisplay = new Html("div")
+      .classOn("rank-display-text")
+      .text("")
+      .appendTo(mainGroup);
 
-    const details = new Html("div").classOn("score-details").appendTo(card);
-    const createGauge = (label, cls) => {
-      const c = new Html("div")
-        .classOn("score-gauge-container")
-        .appendTo(details);
-      new Html("span").classOn("score-gauge-label").text(label).appendTo(c);
-      const g = new Html("div").classOn("score-gauge", cls).appendTo(c);
-      const v = new Html("span").classOn("score-gauge-value").appendTo(g);
-      return { gauge: g, valueDisplay: v };
+    // Gauges Row
+    const gaugeRow = new Html("div")
+      .classOn("score-details-grid")
+      .appendTo(this.dom.postSongScreen);
+
+    this.dom.gauges = {};
+    const createSvgGauge = (label, color) => {
+      const wrap = new Html("div").classOn("gauge-wrapper").appendTo(gaugeRow);
+
+      const svgContainer = new Html("div")
+        .classOn("gauge-svg-container")
+        .appendTo(wrap);
+      // SVG Implementation
+      const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      svg.setAttribute("viewBox", "0 0 100 100");
+      svg.setAttribute("class", "gauge-svg");
+
+      const bgCircle = document.createElementNS(
+        "http://www.w3.org/2000/svg",
+        "circle",
+      );
+      bgCircle.setAttribute("cx", "50");
+      bgCircle.setAttribute("cy", "50");
+      bgCircle.setAttribute("r", "45");
+      bgCircle.setAttribute("class", "gauge-bg-circle");
+
+      const fillCircle = document.createElementNS(
+        "http://www.w3.org/2000/svg",
+        "circle",
+      );
+      fillCircle.setAttribute("cx", "50");
+      fillCircle.setAttribute("cy", "50");
+      fillCircle.setAttribute("r", "45");
+      fillCircle.setAttribute("class", "gauge-fill-circle");
+      fillCircle.style.setProperty("--g-color", color);
+
+      svg.appendChild(bgCircle);
+      svg.appendChild(fillCircle);
+      svgContainer.elm.appendChild(svg);
+
+      const valText = new Html("div")
+        .classOn("gauge-value-text")
+        .text("0")
+        .appendTo(svgContainer);
+      new Html("div").classOn("gauge-label").text(label).appendTo(wrap);
+
+      // Return raw SVG element for circle to avoid invalid element error in Html class
+      return { circle: fillCircle, text: valText };
     };
-    this.dom.gauges = {
-      keyRhythm: createGauge("Key/Rhythm", "gauge-key-rhythm"),
-      vibrato: createGauge("Vibrato", "gauge-vibrato"),
-      upband: createGauge("Upband", "gauge-upband"),
-      downband: createGauge("Downband", "gauge-downband"),
-    };
+
+    this.dom.gauges.keyRhythm = createSvgGauge("Pitch", "#4fc3f7");
+    this.dom.gauges.vibrato = createSvgGauge("Vibrato", "#ba68c8");
+    this.dom.gauges.upband = createSvgGauge("Up-Band", "#ffb74d");
+    this.dom.gauges.downband = createSvgGauge("Down-Band", "#81c784");
+
+    // Footer
+    new Html("div")
+      .classOn("score-skip-hint")
+      .text("PRESS ENTER TO CONTINUE")
+      .appendTo(this.dom.postSongScreen);
   }
 
   buildQR() {
@@ -1032,63 +1144,109 @@ class EncoreController {
   }
 
   async showPostSongScreen(scoreData) {
-    this.dom.finalScoreDisplay.text("0.00");
-    this.dom.postSongScreen.classOn("visible");
+    this.state.isScoreScreenActive = true;
+
+    // Reset visuals
+    this.dom.rankDisplay
+      .text("")
+      .styleJs({ transform: "scale(0.8)", opacity: "0", color: "#fff" });
+    this.dom.finalScoreDisplay.text("0");
+
+    // Reset SVG Gauges: Dashoffset = 283 (full circle hidden)
+    Object.values(this.dom.gauges).forEach((g) => {
+      g.circle.style.strokeDashoffset = "283";
+      g.text.text("0");
+    });
+
+    this.dom.postSongScreen.styleJs({ opacity: "1", pointerEvents: "all" });
     this.Forte.playSfx("/assets/audio/fanfare.mp3");
-    await new Promise((r) => setTimeout(r, 500));
 
-    // Helper to animate numbers
-    const animateNumber = (element, target, duration, isFloat = true) => {
-      return new Promise((res) => {
-        let start = 0;
-        const st = performance.now();
+    // Calculate Grade
+    const s = scoreData.finalScore;
+    let rank = "Good";
+    let rankColor = "#aed581";
+    if (s == 100) {
+      rank = "WHAT THE FUCK HOW";
+      rankColor = "#00e676";
+    } else if (s >= 98) {
+      rank = "HOLY SHIT";
+      rankColor = "#00e676";
+    } else if (s >= 90) {
+      rank = "EXCELLENT";
+      rankColor = "#29b6f6";
+    } else if (s >= 80) {
+      rank = "GREAT";
+      rankColor = "#ffee58";
+    } else if (s >= 60) {
+      rank = "GOOD";
+      rankColor = "#ffca28";
+    } else if (s >= 50) {
+      rank = "DECENT";
+      rankColor = "#ffca28";
+    } else if (s >= 20) {
+      rank = "NICE TRY";
+      rankColor = "#ffca28";
+    } else {
+      rank = "YIKES";
+      rankColor = "#ef5350";
+    }
+
+    // Animation Promise
+    const animate = async () => {
+      const dur = 2000;
+      const start = performance.now();
+      await new Promise((r) => {
         const tick = () => {
-          const p = Math.min((performance.now() - st) / duration, 1);
-          const val = start + (target - start) * p;
-          element.text(isFloat ? val.toFixed(2) : Math.round(val));
+          const now = performance.now();
+          const p = Math.min((now - start) / dur, 1);
+          // Ease out cubic
+          const ease = 1 - Math.pow(1 - p, 3);
+
+          // Score
+          const curScore = s * ease;
+          this.dom.finalScoreDisplay.text(Math.floor(curScore));
+
+          // Gauges (SVG Dashoffset calculation)
+          // Circumference ~ 283. Offset = 283 - (283 * percentage)
+          Object.keys(this.dom.gauges).forEach((k) => {
+            let key = k === "keyRhythm" ? "pitchAndRhythm" : k;
+            const val = (scoreData.details[key] || 0) * ease;
+            const offset = 283 - 283 * (val / 100);
+            this.dom.gauges[k].circle.style.strokeDashoffset = offset;
+            this.dom.gauges[k].text.text(Math.round(val));
+          });
+
           if (p < 1) requestAnimationFrame(tick);
-          else res();
+          else r();
         };
         requestAnimationFrame(tick);
       });
-    };
 
-    // Helper to animate gauges (handles width via css-var and text display)
-    const animateGauge = (gaugeCtx, target, duration) => {
-      return new Promise((res) => {
-        const { gauge, valueDisplay } = gaugeCtx;
-        let start = 0;
-        const st = performance.now();
-        const tick = () => {
-          const p = Math.min((performance.now() - st) / duration, 1);
-          const val = start + (target - start) * p;
-          gauge.styleJs({ "--value": val });
-          valueDisplay.text(Math.round(val) + "%");
-          if (p < 1) requestAnimationFrame(tick);
-          else res();
-        };
-        requestAnimationFrame(tick);
+      // Show Rank
+      this.dom.rankDisplay.text(rank).styleJs({
+        transform: "scale(1)",
+        opacity: "1",
+        color: rankColor,
+        transition: "all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)",
       });
     };
 
-    await animateNumber(
-      this.dom.finalScoreDisplay,
-      scoreData.finalScore,
-      2000,
-      true,
-    );
-    await Promise.all([
-      animateGauge(
-        this.dom.gauges.keyRhythm,
-        scoreData.details.pitchAndRhythm,
-        1500,
-      ),
-      animateGauge(this.dom.gauges.vibrato, scoreData.details.vibrato, 1500),
-      animateGauge(this.dom.gauges.upband, scoreData.details.upband, 1500),
-      animateGauge(this.dom.gauges.downband, scoreData.details.downband, 1500),
+    // Wait for either the animation + delay OR the user to skip
+    await Promise.race([
+      (async () => {
+        await animate();
+        await new Promise((r) => setTimeout(r, 5000));
+      })(),
+      new Promise((resolve) => {
+        this.state.scoreSkipResolver = resolve;
+      }),
     ]);
-    await new Promise((r) => setTimeout(r, 7000));
-    this.dom.postSongScreen.classOff("visible");
+
+    // Cleanup
+    this.dom.postSongScreen.styleJs({ opacity: "0", pointerEvents: "none" });
+    this.state.isScoreScreenActive = false;
+    this.state.scoreSkipResolver = null;
+    await new Promise((r) => setTimeout(r, 400));
   }
 
   async runCalibrationSequence() {
@@ -1132,6 +1290,17 @@ class EncoreController {
   handleKeyDown(e) {
     if (this.mixer.isVisible) {
       this.mixer.handleKeyDown(e);
+      return;
+    }
+
+    // SCORE SCREEN SKIP LOGIC
+    if (this.state.isScoreScreenActive) {
+      if (["Enter", " ", "Escape"].includes(e.key)) {
+        if (this.state.scoreSkipResolver) {
+          this.state.scoreSkipResolver();
+        }
+        e.preventDefault();
+      }
       return;
     }
 
