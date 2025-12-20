@@ -8,25 +8,6 @@ import { PitchDetector } from "https://cdn.jsdelivr.net/npm/pitchy@4.1.0/+esm";
 
 // --- Helper Functions ---
 
-function loadScript(src) {
-  return new Promise((resolve, reject) => {
-    const script = document.createElement("script");
-    script.src = src;
-    script.onload = resolve;
-    script.onerror = reject;
-    document.head.appendChild(script);
-  });
-}
-
-function createEmptyAudioTrack() {
-  const ctx = new AudioContext();
-  const oscillator = ctx.createOscillator();
-  const dst = oscillator.connect(ctx.createMediaStreamDestination());
-  oscillator.start();
-  const track = dst.stream.getAudioTracks()[0];
-  return Object.assign(track, { enabled: false });
-}
-
 function dispatchPlaybackUpdate() {
   document.dispatchEvent(
     new CustomEvent("CherryTree.Forte.Playback.Update", {
@@ -38,7 +19,6 @@ function dispatchPlaybackUpdate() {
 // --- Global Variables & Constants ---
 
 // Core
-let socket;
 let root;
 let audioContext;
 let masterGain;
@@ -50,10 +30,6 @@ let animationFrameId = null;
 let sfxAudioContext;
 let sfxGain;
 const sfxCache = new Map();
-
-// Microphone / PeerJS
-let peer = null;
-const micConnections = new Map();
 
 // UI Elements
 let toastElement = null;
@@ -156,10 +132,6 @@ const state = {
     micChainOutput: null, // Processed signal exit point
     vocalChain: [], // Active plugin instances
     musicGainInRecording: 0.2,
-  },
-  mic: {
-    peerId: null,
-    connectedMics: 0,
   },
   ui: {
     pianoRollVisible: true,
@@ -931,77 +903,7 @@ const pkg = {
       );
     }
 
-    // 5. Initialize PeerJS (Mic)
-    try {
-      await loadScript("https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js");
-      // IPC call optimization: cache this if it doesn't change
-      const peerId = await window.desktopIntegration.ipc.invoke(
-        "mic-get-peer-id",
-      );
-      if (!peerId) throw new Error("Could not get a Peer ID.");
-      state.mic.peerId = peerId;
-
-      peer = new Peer(peerId, {
-        config: {
-          iceServers: [
-            { urls: "stun:stun.l.google.com:19302" },
-            { urls: "stun:stun1.l.google.com:19302" },
-          ],
-        },
-      });
-
-      peer.on("open", (id) => {
-        console.log(`[FORTE SVC] PeerJS client ready. My ID is: ${id}`);
-        document.dispatchEvent(
-          new CustomEvent("CherryTree.Forte.Mic.Ready", {
-            detail: { peerId: id },
-          }),
-        );
-      });
-
-      peer.on("call", async (call) => {
-        const sessionCode = call.metadata?.code;
-        if (
-          !sessionCode ||
-          !(await window.desktopIntegration.ipc.invoke(
-            "mic-validate-code",
-            sessionCode,
-          ))
-        ) {
-          call.close();
-          return;
-        }
-
-        call.answer(new MediaStream([createEmptyAudioTrack()]));
-
-        call.on("stream", (remoteStream) => {
-          const a = new Audio();
-          a.muted = true;
-          a.srcObject = remoteStream;
-          a.autoplay = true;
-
-          if (audioContext.state === "suspended") audioContext.resume();
-          const micSourceNode =
-            audioContext.createMediaStreamSource(remoteStream);
-          micSourceNode.connect(masterGain);
-          micConnections.set(call.peer, { call, node: micSourceNode });
-          state.mic.connectedMics = micConnections.size;
-        });
-
-        call.on("close", () => {
-          const connection = micConnections.get(call.peer);
-          if (connection) {
-            connection.node.disconnect();
-            micConnections.delete(call.peer);
-            state.mic.connectedMics = micConnections.size;
-          }
-        });
-      });
-    } catch (err) {
-      console.error("[FORTE SVC] FATAL: PeerJS initialization failed.", err);
-    }
-
-    // 6. Initialize Local Mic for Scoring
+    // 5. Initialize Local Mic for Scoring
     await pkg.data.initializeScoringEngine();
   },
 
@@ -1800,13 +1702,6 @@ const pkg = {
 
     if (animationFrameId) cancelAnimationFrame(animationFrameId);
     if (state.playback.synthesizer) state.playback.synthesizer.close();
-
-    if (peer) peer.destroy();
-    micConnections.forEach((conn) => {
-      conn.node.disconnect();
-      conn.call.close();
-    });
-    micConnections.clear();
   },
 };
 
