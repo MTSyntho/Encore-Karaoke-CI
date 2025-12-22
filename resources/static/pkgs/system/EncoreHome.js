@@ -202,6 +202,49 @@ class EncoreController {
     }, 100);
   }
 
+  /**
+   * Helper to get format badge details based on song data.
+   * Colors provided: MTV: 2F6CD1, RS: B02FD1, MIDI: D12F9E, MP: 2FD147, YT: D12F2F
+   */
+  getFormatInfo(song) {
+    const colors = {
+      MTV: "#2F6CD1",
+      RealSound: "#B02FD1",
+      MIDI: "#D12F9E",
+      Multiplex: "#2FD147",
+      YouTube: "#D12F2F",
+    };
+
+    if (
+      song.type === "youtube" ||
+      (song.path && song.path.startsWith("yt://"))
+    ) {
+      return { label: "YT", color: colors.YouTube };
+    }
+
+    if (song.videoPath) {
+      return { label: "MTV", color: colors.MTV };
+    }
+
+    if (
+      song.type === "multiplexed" ||
+      (song.path && song.path.toLowerCase().includes("multiplex"))
+    ) {
+      return { label: "MP", color: colors.Multiplex };
+    }
+
+    if (
+      song.type === "mid" ||
+      song.type === "kar" ||
+      (song.path && (song.path.endsWith(".mid") || song.path.endsWith(".kar")))
+    ) {
+      return { label: "MIDI", color: colors.MIDI };
+    }
+
+    // 5. Default to RealSound (Audio + LRC)
+    return { label: "RS", color: colors.RealSound };
+  }
+
   buildUI() {
     // --- Containers ---
     this.dom = {};
@@ -294,10 +337,20 @@ class EncoreController {
         .classOn("song-item")
         .appendTo(this.dom.songListContainer);
       new Html("div").classOn("song-item-code").text(song.code).appendTo(item);
-      new Html("div")
+
+      const fmt = this.getFormatInfo(song);
+      const titleContainer = new Html("div")
         .classOn("song-item-title")
-        .text(song.title)
         .appendTo(item);
+
+      new Html("span")
+        .classOn("format-badge")
+        .text(fmt.label)
+        .styleJs({ backgroundColor: fmt.color })
+        .appendTo(titleContainer);
+
+      new Html("span").text(song.title).appendTo(titleContainer);
+
       new Html("div")
         .classOn("song-item-artist")
         .text(song.artist)
@@ -666,17 +719,31 @@ class EncoreController {
       });
 
       const info = new Html("div").classOn("search-info").appendTo(item);
+      const fmt = this.getFormatInfo(res); // Use the helper
+
       if (res.type === "local") {
         new Html("div")
           .classOn("search-result-local-code")
           .text(res.code)
           .appendTo(item);
-        new Html("div").classOn("search-title").text(res.title).appendTo(info);
+
+        // Modified Title Row
+        const titleRow = new Html("div").classOn("search-title").appendTo(info);
+
+        new Html("span")
+          .classOn("format-badge")
+          .text(fmt.label)
+          .styleJs({ backgroundColor: fmt.color })
+          .appendTo(titleRow);
+
+        new Html("span").text(res.title).appendTo(titleRow);
+
         new Html("div")
           .classOn("search-channel")
           .text(res.artist)
           .appendTo(info);
       } else {
+        // YouTube Result
         const thumb = new Html("div")
           .classOn("search-thumbnail-wrapper")
           .appendTo(item);
@@ -689,17 +756,25 @@ class EncoreController {
             .classOn("search-duration")
             .text(res.length.simpleText)
             .appendTo(thumb);
+
         const titleC = new Html("div")
           .styleJs({ display: "flex", alignItems: "center" })
           .appendTo(info);
+
+        // YouTube Badge (using helper logic, though we know it's YT)
+        new Html("span")
+          .classOn("format-badge")
+          .text(fmt.label)
+          .styleJs({ backgroundColor: fmt.color })
+          .appendTo(titleC);
+
         new Html("div")
           .classOn("search-title")
           .text(res.title)
           .appendTo(titleC);
-        new Html("span")
-          .classOn("search-youtube-badge")
-          .text("YT")
-          .appendTo(titleC);
+
+        // Removed the old "search-youtube-badge" span here since we added the unified format badge above
+
         new Html("div")
           .classOn("search-channel")
           .text(res.channelTitle)

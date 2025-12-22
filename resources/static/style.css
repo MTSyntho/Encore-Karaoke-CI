@@ -2509,6 +2509,30 @@ input[type="range"]::-moz-range-thumb {
   color: #f59e0b;
 }
 
+/* Encore Format Badges */
+.format-badge {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #fff;
+  margin-right: 8px;
+  vertical-align: middle;
+  line-height: 1.2;
+  min-width: 36px;
+  text-align: center;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.25);
+  letter-spacing: 0.5px;
+}
+
+/* Adjust title containers to align text with badges */
+.song-item-title,
+.search-title {
+  display: flex;
+  align-items: center;
+}
+
 @keyframes blink-hint {
   0%,
   100% {
