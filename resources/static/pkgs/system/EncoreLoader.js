@@ -27,72 +27,206 @@ const pkg = {
   type: "app",
   privs: 0,
 
-  // Add the loading sequence function
-  async startLoadingSequence() {
+  /**
+   * Creates a modal to allow the user to select from multiple libraries.
+   * @param {Array<object>} libraries - The list of found library objects.
+   * @returns {Promise<string>} A promise that resolves with the selected library path.
+   */
+  async promptUserToSelectLibrary(libraries) {
+    return new Promise((resolve) => {
+      let selectedIndex = 0;
+
+      // --- CORRECTED: Added style to ensure text is visible ---
+      const modal = new Html("div")
+        .class("modal-container")
+        .appendTo(wrapper)
+        .styleJs({ color: "white" });
+
+      const content = new Html("div").class("modal-content").appendTo(modal);
+      new Html("h2").text("Multiple Libraries Found").appendTo(content);
+      new Html("p")
+        .text("Please select which library you'd like to use for this session.")
+        .appendTo(content);
+
+      const buttonsContainer = new Html("div")
+        .class("modal-buttons")
+        .styleJs({ flexDirection: "column", alignItems: "stretch" })
+        .appendTo(content);
+
+      const cleanupAndResolve = (path) => {
+        document.removeEventListener("keydown", handleKeyDown);
+        modal.cleanup();
+        resolve(path);
+      };
+
+      libraries.forEach((lib) => {
+        new Html("button")
+          .html(
+            `${lib.manifest.title}<br><small style="opacity: 0.7;">${lib.path}</small>`,
+          )
+          .styleJs({
+            textAlign: "left",
+            lineHeight: "1.5",
+            height: "auto",
+            padding: "1rem",
+          })
+          .on("click", () => cleanupAndResolve(lib.path))
+          .appendTo(buttonsContainer);
+      });
+
+      const libraryButtons = buttonsContainer.elm.children;
+
+      const updateSelection = () => {
+        for (let i = 0; i < libraryButtons.length; i++) {
+          libraryButtons[i].classList.toggle("over", i === selectedIndex);
+        }
+        libraryButtons[selectedIndex]?.scrollIntoView({
+          behavior: "smooth",
+          block: "nearest",
+        });
+      };
+
+      const handleKeyDown = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.key === "ArrowDown") {
+          selectedIndex = (selectedIndex + 1) % libraryButtons.length;
+        } else if (e.key === "ArrowUp") {
+          selectedIndex =
+            (selectedIndex - 1 + libraryButtons.length) % libraryButtons.length;
+        } else if (e.key === "Enter") {
+          libraryButtons[selectedIndex]?.click();
+          return;
+        }
+        updateSelection();
+      };
+
+      document.addEventListener("keydown", handleKeyDown);
+      updateSelection();
+    });
+  },
+
+  /**
+   * --- NEW: Enters a polling state, waiting for a library to be connected. ---
+   * @returns {Promise<string>} A promise that resolves with the path of the first library found.
+   */
+  async waitForLibrary() {
+    const fsSvc = root.Processes.getService("FsSvc").data;
+    statusP.text(
+      "No library detected.\nPlease insert a drive with an EncoreLibrary folder.",
+    );
+
+    return new Promise((resolve) => {
+      const intervalId = setInterval(async () => {
+        const foundLibraries = await fsSvc.findEncoreLibraries();
+        if (foundLibraries.length > 0) {
+          clearInterval(intervalId);
+          resolve(foundLibraries[0].path); // Resolve with the first one found
+        }
+      }, 3000); // Check every 3 seconds
+    });
+  },
+
+  /**
+   * The core loading logic after a library path has been determined.
+   * @param {string} libraryPath - The full path to the selected library.
+   */
+  async proceedWithLoading(libraryPath) {
     let fsSvc = root.Processes.getService("FsSvc").data;
     let forteSvc = root.Processes.getService("ForteSvc").data;
 
-    try {
-      const config = await window.desktopIntegration.ipc.invoke("getConfig");
-      console.log(config);
-      if (!config.setupComplete) {
-        await root.Libs.startPkg("system:EncoreSetup", []);
+    statusP.text("Loading Library...");
+    document.addEventListener("CherryTree.FsSvc.SongList.Progress", (e) => {
+      statusP.text(
+        `Loading library...\n${e.detail.current}/${e.detail.total} (${e.detail.percentage}%)`,
+      );
+    });
+    document.addEventListener("CherryTree.Loading.SetText", (e) => {
+      statusP.text(e.detail);
+    });
+
+    fsSvc.buildSongList(libraryPath);
+
+    document.addEventListener(
+      "CherryTree.FsSvc.SongList.Ready",
+      async (e) => {
+        let msgData = e.detail;
+        if (msgData.manifest.additionalContents.soundFont) {
+          statusP.text("Loading sounds...");
+          const url = new URL(`http://1227.0.0.1:9864/getFile`);
+          const soundFontPath = pathJoin([
+            msgData.libraryPath,
+            msgData.manifest.additionalContents.soundFont,
+          ]);
+          url.searchParams.append("path", soundFontPath);
+          await forteSvc.loadSoundFont(url.href);
+        }
+        await root.Libs.startPkg("system:EncoreHome", []);
         this.end();
+      },
+      { once: true },
+    );
+  },
+
+  async startLoadingSequence() {
+    let fsSvc = root.Processes.getService("FsSvc").data;
+
+    try {
+      const config = await window.config.getAll();
+
+      if (config.libraryPath) {
+        await this.proceedWithLoading(config.libraryPath);
       } else {
-        statusP.text("Loading Library...");
-        document.addEventListener("CherryTree.FsSvc.SongList.Progress", (e) => {
-          statusP.text(
-            `Loading library...\n${e.detail.current}/${e.detail.total} (${e.detail.percentage}%)`,
+        statusP.text("Searching for libraries...");
+        const foundLibraries = await fsSvc.findEncoreLibraries();
+
+        if (foundLibraries.length === 1) {
+          statusP.text("Found one library. Configuring automatically...");
+          const libraryPath = foundLibraries[0].path;
+          await window.config.merge({
+            libraryPath: libraryPath,
+            setupComplete: true,
+          });
+          await this.proceedWithLoading(libraryPath);
+        } else if (foundLibraries.length > 1) {
+          statusP.text("Multiple libraries found. Please choose one.");
+          const selectedPath = await this.promptUserToSelectLibrary(
+            foundLibraries,
           );
-        });
-        document.addEventListener("CherryTree.Loading.SetText", (e) => {
-          statusP.text(e.detail);
-        });
-        fsSvc.buildSongList(config.libraryPath);
-        document.addEventListener(
-          "CherryTree.FsSvc.SongList.Ready",
-          async (e) => {
-            let msgData = e.detail;
-            if (msgData.manifest.additionalContents.soundFont) {
-              statusP.text("Loading sounds...");
-              const url = new URL(`http://127.0.0.1:9864/getFile`);
-
-              let soundFontPath = pathJoin([
-                msgData.libraryPath,
-                msgData.manifest.additionalContents.soundFont,
-              ]);
-
-              url.searchParams.append("path", soundFontPath);
-              await forteSvc.loadSoundFont(url.href);
-            }
-            await root.Libs.startPkg("system:EncoreHome", []);
-          },
-          { once: true },
-        );
+          await window.config.merge({
+            libraryPath: selectedPath,
+            setupComplete: true,
+          });
+          await this.proceedWithLoading(selectedPath);
+        } else {
+          // --- CHANGED: Instead of going to setup, wait for a library ---
+          const libraryPath = await this.waitForLibrary();
+          statusP.text("Library detected! Loading...");
+          await window.config.merge({
+            libraryPath: libraryPath,
+            setupComplete: true,
+          });
+          await this.proceedWithLoading(libraryPath);
+        }
       }
     } catch (error) {
-      // Assume config is corrupted
-      console.error("Failed to load config:", error);
-      await root.Libs.startPkg("system:EncoreSetup", []);
-      this.end();
+      console.error("Failed to load or process config:", error);
+      statusP.text("Configuration error. Please restart the application.");
     }
   },
 
   start: async function (Root) {
     root = Root;
     // --- Existing Setup ---
-    window.desktopIntegration !== undefined &&
-      window.desktopIntegration.ipc.send("setRPC", {
-        details: "Booting up...",
-      });
+    window.desktopIntegration?.ipc.send("setRPC", {
+      details: "Booting up...",
+    });
 
     Pid = Root.Pid;
     Ui = Root.Processes.getService("UiLib").data;
     Sfx = Root.Processes.getService("SfxLib").data;
 
-    // --- Create UI Elements (now transparent) ---
     wrapper = new Html("div").class("full-ui").appendTo("body").styleJs({
-      // backgroundColor: "white", // This is no longer needed
       color: "black",
       opacity: 1,
     });
@@ -108,7 +242,6 @@ const pkg = {
       })
       .appendTo(wrapper);
 
-    // Store the image element in a variable to target it with anime.js
     let mascotImg = new Html("img")
       .attr({ src: "assets/img/oobe/hoshi_hi.png" })
       .styleJs({
@@ -150,7 +283,6 @@ const pkg = {
       })
       .appendTo(elementContainer);
 
-    // --- Store Text Elements in Variables to Animate Them ---
     let telebiText = new Html("p")
       .styleJs({
         fontSize: "2rem",
@@ -204,57 +336,50 @@ const pkg = {
     statusP = new Html("p")
       .text("Booting up...")
       .appendTo(right)
-      .styleJs({ textAlign: "right", fontSize: "2rem" });
+      .styleJs({
+        textAlign: "right",
+        fontSize: "2rem",
+        whiteSpace: "pre-wrap",
+      });
 
     Ui.becomeTopUi(Pid, wrapper);
 
-    // --- ANIMATION SEQUENCE ---
     const tl = anime.timeline({
       easing: "easeInOutExpo",
     });
 
-    // 1. Mascot slides in from the left.
-    tl.add(
-      {
-        targets: mascotImg.elm,
-        translateX: ["-50%", 0],
-        opacity: [0, 1],
-        duration: 1200,
-      },
-      0,
-    );
-
-    // 2. "ENCORE" letters fly in, staggered
-    tl.add(
-      {
-        targets: ".encore-letter",
-        translateY: ["100%", 0],
-        opacity: [0, 1],
-        delay: anime.stagger(70),
-      },
-      "-=1000",
-    );
-
-    // 3. "テレビ" and "KARAOKE" fade and slide in
-    tl.add(
-      {
-        targets: [telebiText.elm, karaokeH2.elm],
-        translateY: [-20, 0],
-        opacity: [0, 1],
-        duration: 800,
-      },
-      "-=600",
-    );
-
-    // 4. "Booting up..." text fades in last
-    tl.add(
-      {
-        targets: statusP.elm,
-        opacity: [0, 1],
-        duration: 1000,
-      },
-      "-=500",
-    ).complete = () => {
+    tl
+      .add(
+        {
+          targets: mascotImg.elm,
+          translateX: ["-50%", 0],
+          opacity: [0, 1],
+          duration: 1200,
+        },
+        0,
+      )
+      .add(
+        {
+          targets: ".encore-letter",
+          translateY: ["100%", 0],
+          opacity: [0, 1],
+          delay: anime.stagger(70),
+        },
+        "-=1000",
+      )
+      .add(
+        {
+          targets: [telebiText.elm, karaokeH2.elm],
+          translateY: [-20, 0],
+          opacity: [0, 1],
+          duration: 800,
+        },
+        "-=600",
+      )
+      .add(
+        { targets: statusP.elm, opacity: [0, 1], duration: 1000 },
+        "-=500",
+      ).complete = () => {
       anime({
         targets: statusP.elm,
         opacity: [1, 0.3],
@@ -263,7 +388,6 @@ const pkg = {
         loop: true,
         easing: "easeInOutSine",
       });
-
       this.startLoadingSequence();
     };
 
