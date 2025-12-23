@@ -153,7 +153,7 @@ const pkg = {
         let msgData = e.detail;
         if (msgData.manifest.additionalContents.soundFont) {
           statusP.text("Loading sounds...");
-          const url = new URL(`http://1227.0.0.1:9864/getFile`);
+          const url = new URL(`http://127.0.0.1:9864/getFile`);
           const soundFontPath = pathJoin([
             msgData.libraryPath,
             msgData.manifest.additionalContents.soundFont,
@@ -162,7 +162,6 @@ const pkg = {
           await forteSvc.loadSoundFont(url.href);
         }
         await root.Libs.startPkg("system:EncoreHome", []);
-        this.end();
       },
       { once: true },
     );
@@ -333,14 +332,11 @@ const pkg = {
     new Html("br").appendTo(right);
     new Html("br").appendTo(right);
 
-    statusP = new Html("p")
-      .text("Booting up...")
-      .appendTo(right)
-      .styleJs({
-        textAlign: "right",
-        fontSize: "2rem",
-        whiteSpace: "pre-wrap",
-      });
+    statusP = new Html("p").text("Booting up...").appendTo(right).styleJs({
+      textAlign: "right",
+      fontSize: "2rem",
+      whiteSpace: "pre-wrap",
+    });
 
     Ui.becomeTopUi(Pid, wrapper);
 

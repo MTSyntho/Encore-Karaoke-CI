@@ -26,6 +26,8 @@ function pathJoin(parts, sep) {
 
 class EncoreController {
   constructor(Root, config) {
+    console.log("CONFIG", config);
+    console.log("test", config.audioConfig.mix.instrumental.volume);
     this.Root = Root;
     this.Pid = Root.Pid;
     this.Ui = Root.Processes.getService("UiLib").data;
@@ -45,7 +47,7 @@ class EncoreController {
       reservationNumber: "",
       reservationQueue: [],
       knownRemotes: {},
-      volume: config.audioConfig.mix.instrumental.volume,
+      volume: config.audioConfig?.mix.instrumental.volume ?? 1,
       videoSyncOffset: config.videoConfig?.syncOffset || 0,
       searchResults: [],
       highlightedSearchIndex: -1,
@@ -60,6 +62,8 @@ class EncoreController {
       isScoreScreenActive: false,
       scoreSkipResolver: null,
     };
+
+    console.log(this.state);
 
     // --- Instantiate Modules ---
     this.mixer = new MixerModule(this.Forte);
@@ -129,12 +133,18 @@ class EncoreController {
 
     // Audio Config
     await this.Forte.setTrackVolume(this.state.volume);
-    if (this.config.audioConfig.micLatency)
+    // Use optional chaining for safer access to nested properties
+    if (this.config.audioConfig?.micLatency) {
       await this.Forte.setLatency(this.config.audioConfig.micLatency);
-    if (this.config.audioConfig.mix.scoring.inputDevice)
-      await this.Forte.setMicDevice(
-        this.config.audioConfig.mix.scoring.inputDevice,
-      );
+    }
+
+    // Check for a specific mic device, otherwise use the system default.
+    const micDevice = this.config.audioConfig?.mix?.scoring?.inputDevice;
+    if (micDevice) {
+      await this.Forte.setMicDevice(micDevice);
+    } else {
+      await this.Forte.setMicDevice("default");
+    }
 
     // Build UI
     this.buildUI();
@@ -1396,8 +1406,7 @@ class EncoreController {
     this.dom.calibText.text("Calibrating... A series of beeps will play.");
     try {
       const lat = await this.Forte.runLatencyTest();
-      this.config.audioConfig.micLatency = lat;
-      window.desktopIntegration.ipc.send("updateConfig", this.config);
+      window.config.setItem("audioConfig.micLatency", lat);
       this.dom.calibTitle.text("CALIBRATION COMPLETE");
       this.dom.calibText.text(
         `Measured audio latency is ${(lat * 1000).toFixed(0)} ms.`,
@@ -1725,8 +1734,10 @@ class EncoreController {
       `<div class="volume-display"><div class="volume-slider-container"><div class="volume-slider-fill" style="width: ${p}%"></div></div><span class="volume-percentage">${p}%</span></div>`,
       3000,
     );
-    this.config.audioConfig.mix.instrumental.volume = this.state.volume;
-    window.desktopIntegration.ipc.send("updateConfig", this.config);
+    window.config.setItem(
+      "audioConfig.mix.instrumental.volume",
+      this.state.volume,
+    );
   }
 
   handleBracket(key) {
@@ -1739,11 +1750,10 @@ class EncoreController {
           " ms",
         3000,
       );
-      this.config.videoConfig = {
-        ...this.config.videoConfig,
-        syncOffset: this.state.videoSyncOffset,
-      };
-      window.desktopIntegration.ipc.send("updateConfig", this.config);
+      window.config.setItem(
+        "videoConfig.syncOffset",
+        this.state.videoSyncOffset,
+      );
     } else {
       this.bgv.cycleCategory(key === "[" ? -1 : 1);
       const cats = ["Auto", ...this.bgv.categories.map((c) => c.BGV_CATEGORY)];
@@ -1905,7 +1915,7 @@ const pkg = {
   type: "app",
   privs: 0,
   start: async function (Root) {
-    const config = await window.desktopIntegration.ipc.invoke("getConfig");
+    const config = await window.config.getAll();
     controller = new EncoreController(Root, config);
     await controller.init();
   },
