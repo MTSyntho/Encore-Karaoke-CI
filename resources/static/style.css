@@ -1162,10 +1162,79 @@ kbd {
   z-index: 12;
 }
 
-.mode-menu.is-typing .main-content {
+.standby-screen {
+  position: absolute;
+  bottom: 8%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: auto;
+  min-width: 450px;
+  max-width: 55%;
+  height: auto;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: rgba(8, 8, 16, 0.75);
+  backdrop-filter: blur(8px);
+  border-radius: 0.5rem;
+  box-shadow: 0 5px 25px rgba(0, 0, 0, 0.5);
+  padding: 1rem;
+  z-index: 11;
+  transition: opacity 0.3s ease-out, background 0.3s ease-out;
+  pointer-events: none;
+}
+
+.standby-screen.has-bumper-image {
+  background: transparent;
+  backdrop-filter: none;
+  box-shadow: none;
+  padding: 0;
+  min-height: 0; /* remove height constraint */
+}
+
+/* This rule applies a shadow directly to the image */
+.standby-bumper-image {
+  max-height: 15em; /* Made the image slightly larger */
+  max-width: 100%;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  opacity: 1;
+  transition: opacity 0.5s ease-in-out;
+  /* This filter creates a shadow that respects transparency, perfect for logos */
+  filter: drop-shadow(0 5px 15px rgba(0, 0, 0, 0.6));
+  border-radius: 10px;
+}
+
+.standby-text {
+  /* This element no longer needs absolute positioning */
+  font-family: "Rajdhani", sans-serif;
+  font-size: 2rem;
+  font-weight: 700;
+  color: #fff;
+  text-shadow: 2px 2px 5px rgba(0, 0, 0, 0.7);
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  padding: 0 1.5rem;
+}
+
+/* Ensure the elements controlled by is-typing are also hidden on standby */
+.mode-menu:not(.is-typing) .main-content {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.mode-menu.is-typing .song-list-container,
+.mode-menu.is-typing .bottom-actions {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* .mode-menu.is-typing .main-content {
   opacity: 1;
   pointer-events: all;
-}
+} */
 
 .mode-menu:not(.is-typing) .main-content {
   opacity: 0;

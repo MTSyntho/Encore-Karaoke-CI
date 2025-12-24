@@ -61,7 +61,12 @@ class EncoreController {
       lastPlaybackStatus: null,
       isScoreScreenActive: false,
       scoreSkipResolver: null,
+      showSongList: false,
     };
+
+    this.bumperImages = [];
+    this.currentBumperIndex = 0;
+    this.bumperInterval = null;
 
     console.log(this.state);
 
@@ -195,6 +200,15 @@ class EncoreController {
         isAbsolute: true,
       });
 
+    const bumperPaths =
+      this.libraryInfo.manifest.additionalContents?.bumperImages;
+    if (bumperPaths && bumperPaths.length > 0) {
+      this.bumperImages = bumperPaths.map((p) =>
+        pathJoin([this.libraryInfo.path, p]),
+      );
+      this.startBumperCycle();
+    }
+
     await this.bgv.updatePlaylistForCategory();
 
     setTimeout(() => {
@@ -255,6 +269,19 @@ class EncoreController {
     this.dom.overlay = new Html("div")
       .classOn("overlay-ui")
       .appendTo(this.wrapper);
+
+    // --- Standby Screen UI (Banner) ---
+    this.dom.standbyScreen = new Html("div")
+      .classOn("standby-screen")
+      .appendTo(this.dom.overlay);
+    this.dom.standbyBumper = new Html("img")
+      .classOn("standby-bumper-image")
+      .appendTo(this.dom.standbyScreen);
+    this.dom.standbyText = new Html("div")
+      .classOn("standby-text")
+      .text("SELECT SONG")
+      .appendTo(this.dom.standbyScreen);
+
     this.dom.searchUi = new Html("div")
       .classOn("search-ui")
       .appendTo(this.wrapper);
@@ -292,15 +319,17 @@ class EncoreController {
     this.dom.calibText = new Html("p").appendTo(this.dom.calibrationScreen);
 
     // --- Main Menu Content ---
-    const mainContent = new Html("div")
+    this.dom.mainContent = new Html("div")
       .classOn("main-content")
       .appendTo(this.dom.overlay);
-    new Html("h1").text("Enter Song Number").appendTo(mainContent);
+    new Html("h1").text("Enter Song Number").appendTo(this.dom.mainContent);
     this.dom.numberDisplay = new Html("div")
       .classOn("number-display")
-      .appendTo(mainContent);
+      .appendTo(this.dom.mainContent);
 
-    const songInfo = new Html("div").classOn("song-info").appendTo(mainContent);
+    const songInfo = new Html("div")
+      .classOn("song-info")
+      .appendTo(this.dom.mainContent);
     this.dom.songTitle = new Html("h2")
       .classOn("song-title")
       .appendTo(songInfo);
@@ -329,33 +358,25 @@ class EncoreController {
     );
 
     this.songItemElements = [];
-
-    // OPTIMIZATION: Use DocumentFragment
     const listFragment = document.createDocumentFragment();
 
     this.songList.forEach((song, index) => {
-      // Create the item disconnected from DOM initially
       const item = new Html("div").classOn("song-item");
       new Html("div").classOn("song-item-code").text(song.code).appendTo(item);
-
       const fmt = this.getFormatInfo(song);
       const titleContainer = new Html("div")
         .classOn("song-item-title")
         .appendTo(item);
-
       new Html("span")
         .classOn("format-badge")
         .text(fmt.label)
         .styleJs({ backgroundColor: fmt.color })
         .appendTo(titleContainer);
-
       new Html("span").text(song.title).appendTo(titleContainer);
-
       new Html("div")
         .classOn("song-item-artist")
         .text(song.artist)
         .appendTo(item);
-
       item.on("click", () => this.startPlayer(song));
       item.on("mouseover", () => {
         if (this.state.mode === "menu" && !this.state.isTypingNumber) {
@@ -364,33 +385,30 @@ class EncoreController {
         }
       });
       this.songItemElements.push(item);
-
-      // Append raw element to fragment
       listFragment.appendChild(item.elm);
     });
 
-    // Single DOM insertion
     this.dom.songListContainer.elm.appendChild(listFragment);
 
     // --- Bottom Actions ---
-    const actions = new Html("div")
+    this.dom.bottomActions = new Html("div")
       .classOn("bottom-actions")
       .appendTo(this.dom.overlay);
     new Html("div")
       .classOn("action-button")
       .text("Search (Y)")
       .on("click", () => this.setMode("yt-search"))
-      .appendTo(actions);
+      .appendTo(this.dom.bottomActions);
     new Html("div")
       .classOn("action-button")
       .text("Calibrate Audio (C)")
       .on("click", () => this.runCalibrationSequence())
-      .appendTo(actions);
+      .appendTo(this.dom.bottomActions);
     new Html("div")
       .classOn("action-button")
       .text("Mic/Music Setup (M)")
       .on("click", () => this.mixer.toggle())
-      .appendTo(actions);
+      .appendTo(this.dom.bottomActions);
 
     // --- QR Code ---
     this.buildQR();
@@ -554,6 +572,47 @@ class EncoreController {
 
   // --- Core Logic Methods ---
 
+  startBumperCycle() {
+    if (this.bumperInterval) clearInterval(this.bumperInterval);
+    if (this.bumperImages.length === 0) {
+      this.dom.standbyBumper.classOn("hidden");
+      this.dom.standbyText.classOff("hidden");
+      this.dom.standbyScreen.classOff("has-bumper-image");
+      return;
+    }
+
+    this.dom.standbyText.classOn("hidden");
+    this.dom.standbyBumper.classOff("hidden");
+    this.dom.standbyScreen.classOn("has-bumper-image");
+
+    const cycle = () => {
+      this.dom.standbyBumper.styleJs({ opacity: 0 });
+      setTimeout(() => {
+        this.currentBumperIndex =
+          (this.currentBumperIndex + 1) % this.bumperImages.length;
+        const nextImage = this.bumperImages[this.currentBumperIndex];
+        const imageUrl = new URL("http://127.0.0.1:9864/getFile");
+        imageUrl.searchParams.append("path", nextImage);
+        this.dom.standbyBumper.attr({ src: imageUrl.href });
+        this.dom.standbyBumper.styleJs({ opacity: 1 });
+      }, 500); // Wait for fade out
+    };
+
+    // Load initial image
+    const initialImage = this.bumperImages[0];
+    const imageUrl = new URL("http://127.0.0.1:9864/getFile");
+    imageUrl.searchParams.append("path", initialImage);
+    this.dom.standbyBumper.attr({ src: imageUrl.href });
+
+    this.bumperInterval = setInterval(cycle, 8000); // 8-second interval
+  }
+
+  showTheSongList() {
+    if (this.state.mode !== "menu" || this.state.showSongList) return;
+    this.state.showSongList = true;
+    this.updateMenuUI();
+  }
+
   setMode(newMode) {
     this.state.mode = newMode;
     this.wrapper.classOff(
@@ -570,6 +629,7 @@ class EncoreController {
     if (this.state.isSearchOverlayVisible) this.toggleSearchOverlay(false);
 
     if (newMode === "menu") {
+      this.state.showSongList = false;
       this.dom.overlay.classOff("hidden");
       this.dom.searchInput.elm.blur();
       this.infoBar.hideBar();
@@ -591,6 +651,22 @@ class EncoreController {
   }
 
   updateMenuUI() {
+    if (!this.state.showSongList && this.state.mode === "menu") {
+      this.dom.standbyScreen.classOff("hidden");
+      this.dom.mainContent.classOn("hidden");
+      this.dom.songListContainer.classOn("hidden");
+      this.dom.bottomActions.classOn("hidden");
+      // Hide the number display text content when not showing the list
+      this.dom.numberDisplay.text("");
+      this.dom.songTitle.text("");
+      this.dom.songArtist.text("");
+      return;
+    }
+    // If we're here, we want to show the list/input UI
+    this.dom.standbyScreen.classOn("hidden");
+    this.dom.mainContent.classOff("hidden");
+    this.dom.songListContainer.classOff("hidden");
+    this.dom.bottomActions.classOff("hidden");
     this.wrapper[this.state.isTypingNumber ? "classOn" : "classOff"](
       "is-typing",
     );
@@ -1461,6 +1537,17 @@ class EncoreController {
       e.preventDefault();
     }
 
+    if (this.state.mode === "menu" && !this.state.showSongList) {
+      // Any interaction key will show the song list
+      if (
+        (e.key >= "0" && e.key <= "9") ||
+        e.key.startsWith("Arrow") ||
+        e.key.toLowerCase() === "y"
+      ) {
+        this.showTheSongList();
+      }
+    }
+
     if (e.key.toLowerCase() === "m") {
       this.mixer.toggle();
       return;
@@ -1636,10 +1723,17 @@ class EncoreController {
       this.toggleSearchOverlay(false);
       return;
     }
-    if (this.state.mode === "menu" && this.state.isTypingNumber) {
-      this.state.songNumber = "";
-      this.state.isTypingNumber = false;
-      this.updateMenuUI();
+    if (this.state.mode === "menu") {
+      if (this.state.isTypingNumber) {
+        this.state.songNumber = "";
+        this.state.isTypingNumber = false;
+        this.updateMenuUI();
+      } else if (this.state.showSongList) {
+        // If list is shown, hide it and go back to standby
+        this.state.showSongList = false;
+        this.state.highlightedIndex = -1;
+        this.updateMenuUI();
+      }
       return;
     }
     if (this.state.mode.startsWith("player")) {
