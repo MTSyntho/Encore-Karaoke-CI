@@ -290,7 +290,9 @@ server.get("/yt-search", async (req, res) => {
 });
 
 server.get("/romanize", async (req, res) => {
-  res.send(await kuroshiro.convert(req.query.t, { to: "romaji" }));
+  res.send(
+    await kuroshiro.convert(req.query.t, { to: "romaji", mode: "spaced" }),
+  );
 });
 
 server.post("/auth/create-hash", (req, res) => {

@@ -988,7 +988,8 @@ class EncoreController {
 
       // Feature Parity: YouTube tracks now react to volume
       this.state.windowsVolume = await window.volume.getVolume();
-      window.volume.setVolume(this.state.volume * 100);
+      let maxVolume = this.state.windowsVolume;
+      window.volume.setVolume(this.state.volume * maxVolume);
 
       this.bgv.stop();
       this.dom.bgvContainer.classOn("hidden");
@@ -1916,7 +1917,8 @@ class EncoreController {
     );
     this.Forte.setTrackVolume(this.state.volume);
     if (this.state.currentSongIsYouTube) {
-      window.volume.setVolume(this.state.volume * 100);
+      let maxVolume = this.state.windowsVolume;
+      window.volume.setVolume(this.state.volume * maxVolume);
     }
     const p = Math.round(this.state.volume * 100);
     this.infoBar.showTemp(
