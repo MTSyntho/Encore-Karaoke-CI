@@ -1105,45 +1105,54 @@ class EncoreController {
       this.dom.midiContainer.styleJs({ display: "flex" });
       this.dom.lrcContainer.styleJs({ display: "none" });
 
+      // --- Metadata parsing ---
+      let lyricsToParse = [...pbState.decodedLyrics];
+      let fullMetadataString = "";
+      while (
+        lyricsToParse.length > 0 &&
+        (lyricsToParse[0].trim().startsWith("{@") ||
+          lyricsToParse[0].trim().startsWith("{#"))
+      ) {
+        fullMetadataString += lyricsToParse.shift();
+      }
+      if (fullMetadataString) {
+        const metadata = {};
+        const regex = /{#([^=]+)=([^}]+)}/g;
+        let match;
+        while ((match = regex.exec(fullMetadataString)) !== null) {
+          metadata[match[1].toUpperCase()] = match[2];
+        }
+        console.log("[Encore] Parsed MIDI Metadata:", metadata);
+        if (metadata.TITLE) this.dom.introTitle.text(metadata.TITLE);
+        if (metadata.ARTIST) this.dom.introArtist.text(metadata.ARTIST);
+      }
+
+      // --- Synchronous syllable parsing ---
       const allSyllables = [];
       const lines = [];
       let currentLineSyllables = [];
       let displayableSyllableIndex = 0;
-
-      // --- Parsing Logic ---
-      for (const syllableText of pbState.decodedLyrics) {
+      for (const syllableText of lyricsToParse) {
         const startsWithNewLine = /^[\r\n\/\\\\]/.test(syllableText);
         const endsWithNewLine = /[\r\n\/\\\\]$/.test(syllableText);
-
-        // Remove control characters for processing
         let cleanText = syllableText.replace(/[\r\n\/\\]/g, "");
-
         if (startsWithNewLine && currentLineSyllables.length > 0) {
           lines.push(currentLineSyllables);
           currentLineSyllables = [];
         }
-
         if (cleanText) {
           let mainText = cleanText;
           let furiganaText = null;
-
-          // Regex to catch "Kanji[Furigana]" format
-          // Matches any char non-greedy, followed by content in brackets
           const furiMatch = cleanText.match(/^(.+?)\[(.+?)\]$/);
-
           if (furiMatch) {
-            mainText = furiMatch[1]; // e.g., 星空
-            furiganaText = furiMatch[2]; // e.g., ほし
+            mainText = furiMatch[1];
+            furiganaText = furiMatch[2];
           }
-
-          // Use Furigana for Romanization if available, otherwise use main text.
-          const textToRomanize = furiganaText || mainText;
-          const romanized = await Romanizer.romanize(textToRomanize);
-
           const syllable = {
             text: mainText,
             furigana: furiganaText,
-            romanized: romanized,
+            romanized: null,
+            romanizationPromise: null,
             rawText: cleanText,
             globalIndex: displayableSyllableIndex,
             lineIndex: lines.length,
@@ -1152,7 +1161,6 @@ class EncoreController {
           currentLineSyllables.push(syllable);
           displayableSyllableIndex++;
         }
-
         if (endsWithNewLine && cleanText && currentLineSyllables.length > 0) {
           lines.push(currentLineSyllables);
           currentLineSyllables = [];
@@ -1160,12 +1168,24 @@ class EncoreController {
       }
       if (currentLineSyllables.length > 0) lines.push(currentLineSyllables);
 
-      // --- Rendering Setup ---
       const displayLines = [
         this.dom.midiLineDisplay1,
         this.dom.midiLineDisplay2,
       ];
       let currentSongLineIndex = -1;
+
+      const getRomanizationPromise = (syllable) => {
+        if (!syllable.romanizationPromise) {
+          const textToRomanize = syllable.furigana || syllable.text;
+          syllable.romanizationPromise = Romanizer.romanize(
+            textToRomanize,
+          ).then((romanizedText) => {
+            syllable.romanized = romanizedText || "";
+            return syllable.romanized;
+          });
+        }
+        return syllable.romanizationPromise;
+      };
 
       const renderLine = (displayEl, lineData) => {
         displayEl.clear();
@@ -1176,54 +1196,61 @@ class EncoreController {
             .attr({ "data-index": s.globalIndex })
             .appendTo(displayEl);
 
+          // Render Furigana and Original text immediately
           const furiSpan = new Html("span")
             .classOn("lyric-syllable-furigana")
             .appendTo(container);
-
           if (s.furigana) {
             furiSpan.attr({ "data-text": s.furigana }).text(s.furigana);
           } else {
             furiSpan.html("&nbsp;").styleJs({ visibility: "hidden" });
           }
-
           new Html("span")
             .classOn("lyric-syllable-original")
             .attr({ "data-text": s.text })
             .text(s.text)
             .appendTo(container);
 
+          const romSpan = new Html("span")
+            .classOn("lyric-syllable-romanized")
+            .appendTo(container);
           if (s.romanized) {
-            new Html("span")
-              .classOn("lyric-syllable-romanized")
-              .attr({ "data-text": s.romanized })
-              .text(s.romanized)
-              .appendTo(container);
+            romSpan.attr({ "data-text": s.romanized }).text(s.romanized);
+          } else {
+            romSpan.html("&nbsp;").styleJs({ visibility: "hidden" });
+            getRomanizationPromise(s).then((romanizedText) => {
+              if (romanizedText) {
+                romSpan
+                  .attr({ "data-text": romanizedText })
+                  .text(romanizedText)
+                  .styleJs({ visibility: "visible" });
+              }
+            });
           }
         });
       };
 
-      // Initial render
-      displayLines.forEach((line) => line.clear().classOff("active", "next"));
+      // --- Initial Rendering ---
+      // Render the first two lines, which will automatically start their romanization process.
       renderLine(displayLines[0], lines[0]);
       renderLine(displayLines[1], lines[1]);
       displayLines[0].classOn("active");
       displayLines[1].classOn("next");
 
-      let currentVisualIndex = 0;
+      // --- Pre-fetch the third line to prevent pop-in on the first line change ---
+      if (lines[2]) {
+        lines[2].forEach(getRomanizationPromise);
+      }
 
+      let currentVisualIndex = 0;
       this.boundLyricEvent = (e) => {
         const { text } = e.detail;
-
         if (!text) return;
         const cleanInput = text.replace(/[\r\n\/\\]/g, "");
         if (!cleanInput) return;
-
         if (currentVisualIndex >= allSyllables.length) return;
-
         let targetSyllable = allSyllables[currentVisualIndex];
         let matchFound = false;
-
-        // Check against rawText (which includes the brackets) to match the incoming MIDI event exactly
         if (targetSyllable.rawText === cleanInput) {
           matchFound = true;
         } else {
@@ -1231,13 +1258,8 @@ class EncoreController {
             currentVisualIndex + 15,
             allSyllables.length,
           );
-
           for (let i = currentVisualIndex + 1; i < lookAheadLimit; i++) {
-            // Check rawText here as well
             if (allSyllables[i].rawText === cleanInput) {
-              console.log(
-                `[Encore] Lyric Resync: Skipped from ${currentVisualIndex} to ${i} ("${cleanInput}")`,
-              );
               currentVisualIndex = i;
               targetSyllable = allSyllables[i];
               matchFound = true;
@@ -1247,23 +1269,26 @@ class EncoreController {
         }
 
         if (matchFound) {
-          // Handle Line Swapping
           if (targetSyllable.lineIndex !== currentSongLineIndex) {
             currentSongLineIndex = targetSyllable.lineIndex;
             const activeDisplay = displayLines[currentSongLineIndex % 2];
             const nextDisplay = displayLines[(currentSongLineIndex + 1) % 2];
             activeDisplay.classOn("active").classOff("next");
             nextDisplay.classOff("active").classOn("next");
-            renderLine(nextDisplay, lines[currentSongLineIndex + 1]);
-          }
 
-          // Highlight the syllable
+            // Render the new "next" line
+            renderLine(nextDisplay, lines[currentSongLineIndex + 1]);
+
+            // Pre-fetch the romanization for the line after that
+            const nextNextLine = lines[currentSongLineIndex + 2];
+            if (nextNextLine) {
+              nextNextLine.forEach(getRomanizationPromise);
+            }
+          }
           const newSyllableEl = this.wrapper.qs(
             `.lyric-syllable-container[data-index="${targetSyllable.globalIndex}"]`,
           );
           if (newSyllableEl) newSyllableEl.classOn("active");
-
-          // Advance cursor
           currentVisualIndex++;
         } else {
           console.debug(`[Encore] Ignored metadata event: ${cleanInput}`);
