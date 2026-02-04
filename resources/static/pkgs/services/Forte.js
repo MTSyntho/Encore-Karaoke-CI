@@ -949,6 +949,7 @@ const pkg = {
             [{ binary: arrayBuffer }],
             state.playback.synthesizer,
           );
+          state.playback.sequencer.stop();
           state.playback.sequencer.loop = false;
 
           state.playback.sequencer.addOnSongEndedEvent(() => {
@@ -1041,6 +1042,7 @@ const pkg = {
         pkg.data.stopMicInput();
         state.scoring.enabled = false;
 
+        state.playback.sequencer.currentTime = 0;
         state.playback.sequencer.play();
         state.playback.status = "playing";
       } else {
