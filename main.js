@@ -21,7 +21,7 @@ const Kuroshiro = require("kuroshiro").default;
 const YouTubeCastReceiver = require("yt-cast-receiver");
 const { Player } = require("yt-cast-receiver");
 const youtubesearchapi = require("youtube-search-api");
-const nodeDiskInfo = require("node-disk-info");
+const si = require("systeminformation"); // Replaced node-disk-info
 const mime = require("mime-types");
 
 // --- Integration Imports ---
@@ -216,12 +216,17 @@ server.get("/qr", (req, res) => {
 });
 
 // --- File System Routes ---
-server.get("/drives", (req, res) => {
+server.get("/drives", async (req, res) => {
   logger.debug("FILE", "Requesting drives");
-  nodeDiskInfo
-    .getDiskInfo()
-    .then((disks) => res.json(disks.map((d) => d.mounted)))
-    .catch((reason) => res.status(500).send(reason));
+  try {
+    const disks = await si.fsSize();
+    // Use Set to remove any duplicate mount points, map `mount` property (e.g. 'C:', 'D:', '/')
+    const mountPoints = [...new Set(disks.map((d) => d.mount))];
+    res.json(mountPoints);
+  } catch (error) {
+    logger.error("FILE", `Failed to get drives: ${error.message}`);
+    res.status(500).send(error.message);
+  }
 });
 
 server.post("/list", (req, res) => {
