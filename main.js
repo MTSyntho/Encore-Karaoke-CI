@@ -327,7 +327,7 @@ server.post("/auth/verify-hash", (req, res) => {
 const createWindow = () => {
   const win = new BrowserWindow({
     width: 1280,
-    height: 720,
+    height: 752,
     icon: "icon.png",
     autoHideMenuBar: true,
     webPreferences: {
