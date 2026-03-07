@@ -186,7 +186,7 @@ class EncoreController {
 
     // Start BGV
     console.log("MANIFEST", this.libraryInfo);
-    if (this.libraryInfo.additionalContents?.bgvCategories) {
+    if (this.libraryInfo.manifest?.additionalContents?.bgvCategories) {
       await this.bgv.loadManifestCategories();
       let libraryBgvCategories =
         this.libraryInfo.manifest.additionalContents.bgvCategories;
