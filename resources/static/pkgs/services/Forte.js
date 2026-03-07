@@ -747,7 +747,7 @@ const pkg = {
         await audioContext.audioWorklet.addModule(
           "/libs/spessasynth_lib/synthetizer/worklet_processor.min.js",
         );
-        const soundFontUrl = "/libs/soundfonts/GeneralUser-GS.sf2";
+        const soundFontUrl = "/libs/soundfonts/SAM2695.sf2";
         const soundFontBuffer = await (await fetch(soundFontUrl)).arrayBuffer();
         state.playback.synthesizer = new Synthetizer(
           masterGain,
@@ -949,6 +949,7 @@ const pkg = {
             [{ binary: arrayBuffer }],
             state.playback.synthesizer,
           );
+          state.playback.sequencer.stop();
           state.playback.sequencer.loop = false;
 
           state.playback.sequencer.addOnSongEndedEvent(() => {
@@ -1041,6 +1042,7 @@ const pkg = {
         pkg.data.stopMicInput();
         state.scoring.enabled = false;
 
+        state.playback.sequencer.currentTime = 0;
         state.playback.sequencer.play();
         state.playback.status = "playing";
       } else {
