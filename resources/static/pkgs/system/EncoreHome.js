@@ -69,6 +69,10 @@ class EncoreController {
     this.bumperImages = [];
     this.currentBumperIndex = 0;
     this.bumperInterval = null;
+    // versionInformation is obtained asynchronously via the preload API. We'll
+    // populate it during init so we can await the promise and avoid holding a
+    // bare Promise object.
+    this.versionInformation = null;
 
     console.log(this.state);
 
@@ -145,6 +149,15 @@ class EncoreController {
       details: `Browsing ${this.songList.length} Songs...`,
       state: `Main Menu`,
     });
+
+    // Version Info
+    // we need to fetch the version information before doing any logging that
+    // references it.  getVersionInformation() returns a Promise, so await it and
+    // stash the result in the instance.
+    this.versionInformation = await window.version.getVersionInformation();
+    console.log(
+      `Encore ${this.versionInformation.channel} running in version ${this.versionInformation.number}`,
+    );
 
     // Audio Config
     await this.Forte.setTrackVolume(this.state.volume);
@@ -493,9 +506,15 @@ class EncoreController {
     this.buildQR();
 
     // --- Version Badge ---
+    const vi = this.versionInformation || {
+      channel: "",
+      number: "",
+      codename: "",
+    };
+
     new Html("div")
       .classOn("version-badge")
-      .text("BETA 1.0.0")
+      .text(`${vi.channel} v${vi.number} (${vi.codename})`.trim())
       .appendTo(this.wrapper);
 
     // --- Search Window ---

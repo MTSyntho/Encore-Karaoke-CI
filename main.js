@@ -27,6 +27,7 @@ const mime = require("mime-types");
 // --- Integration Imports ---
 const { Client } = require("@xhayper/discord-rpc");
 const Config = require("./config-manager"); // The new file
+const { version } = require("os");
 
 // ==========================================
 // 1. LOGGING SYSTEM
@@ -47,6 +48,13 @@ const logger = {
 // ==========================================
 // 2. INITIALIZATION
 // ==========================================
+
+const versionInformation = {
+  number: "1.0.0",
+  channel: "BETA",
+  codename: "Virgo",
+};
+
 const PORT = 9864;
 const server = express();
 const serverHttp = http.createServer(server);
@@ -379,6 +387,12 @@ app.whenReady().then(() => {
   });
 
   // --- Electron IPC Handlers ---
+
+  // Versioning info
+  ipcMain.handle("get-version", () => {
+    return versionInformation;
+  });
+
   // Get the entire configuration object, useful for initial state hydration.
   ipcMain.handle("config-get-all", () => Config.getAll());
 

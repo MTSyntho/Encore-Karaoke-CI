@@ -24,3 +24,7 @@ contextBridge.exposeInMainWorld("volume", {
   getVolume: async () => ipcRenderer.invoke("get-volume"),
   setVolume: async (vol) => ipcRenderer.send("set-volume", vol),
 });
+
+contextBridge.exposeInMainWorld("version", {
+  getVersionInformation: async () => ipcRenderer.invoke("get-version"),
+});
