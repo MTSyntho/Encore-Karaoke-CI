@@ -811,6 +811,7 @@ class EncoreController {
       this.dom.searchInput.elm.focus();
       this.dom.searchInput.elm.select();
     } else {
+      this.state.highlightedSearchIndex = -1;
       this.wrapper.classOff("search-overlay-active", "in-game-search-active");
       this.dom.searchWindow.classOff("has-results");
       this.dom.searchInput.elm.blur();
@@ -891,13 +892,17 @@ class EncoreController {
   }
 
   renderSearchResults() {
+    const prevHighlight = this.state.highlightedSearchIndex;
+
     this.dom.searchResultsContainer.clear();
-    this.state.highlightedSearchIndex = -1;
+    this.state.highlightedSearchIndex = prevHighlight;
+
     if (!this.state.searchResults.length) {
       this.dom.searchResultsContainer.text(
         this.state.isSearching ? "Searching..." : "No results found.",
       );
       this.dom.searchWindow.classOff("has-results");
+      this.state.highlightedSearchIndex = -1;
       return;
     }
     this.dom.searchWindow.classOn("has-results");
@@ -943,10 +948,17 @@ class EncoreController {
         const thumb = new Html("div")
           .classOn("search-thumbnail-wrapper")
           .appendTo(item);
-        new Html("img")
+
+        const img = new Html("img")
           .classOn("search-thumbnail")
-          .attr({ src: res.thumbnail.thumbnails[0].url })
+          .styleJs({ opacity: "0", transition: "opacity 0.3s ease" })
           .appendTo(thumb);
+
+        img.elm.onload = () => {
+          img.styleJs({ opacity: "1" });
+        };
+        img.attr({ src: res.thumbnail.thumbnails[0].url });
+
         if (res.length?.simpleText)
           new Html("span")
             .classOn("search-duration")
@@ -974,6 +986,11 @@ class EncoreController {
           .appendTo(info);
       }
     });
+
+    if (this.state.highlightedSearchIndex >= this.state.searchResults.length) {
+      this.state.highlightedSearchIndex = -1;
+    }
+
     this.updateSearchHighlight();
   }
 
@@ -1848,28 +1865,48 @@ class EncoreController {
   }
 
   handleEnter() {
+    const isInputFocused = document.activeElement === this.dom.searchInput.elm;
+    const isSearchActive =
+      this.state.isSearchOverlayVisible ||
+      this.state.mode === "yt-search" ||
+      isInputFocused ||
+      (this.dom.searchWindow.elm.classList.contains("has-results") &&
+        this.state.highlightedSearchIndex !== -1);
+
     if (this.state.mode === "menu") {
-      if (
-        this.state.isSearchOverlayVisible &&
-        this.state.highlightedSearchIndex !== -1
-      ) {
-        const res = this.state.searchResults[this.state.highlightedSearchIndex];
-        const song =
-          res.type === "local"
-            ? { ...res }
-            : {
-                title: res.title,
-                artist: res.channelTitle,
-                path: `yt://${res.id}`,
-                durationText: res.length?.simpleText,
-                isLive: res.isLive,
-              };
-        this.state.songNumber = "";
-        this.state.highlightedIndex = -1;
-        this.state.isTypingNumber = false;
-        this.toggleSearchOverlay(false);
-        this.startPlayer(song);
-      } else if (this.state.reservationQueue.length)
+      if (isSearchActive) {
+        if (this.state.highlightedSearchIndex !== -1) {
+          const res =
+            this.state.searchResults[this.state.highlightedSearchIndex];
+          const song =
+            res.type === "local"
+              ? { ...res }
+              : {
+                  title: res.title,
+                  artist: res.channelTitle,
+                  path: `yt://${res.id}`,
+                  durationText: res.length?.simpleText,
+                  isLive: res.isLive,
+                };
+          this.state.songNumber = "";
+          this.state.highlightedIndex = -1;
+          this.state.isTypingNumber = false;
+
+          this.state.highlightedSearchIndex = -1;
+          this.dom.searchInput.elm.value = "";
+          this.state.searchResults = [];
+          this.renderSearchResults();
+
+          if (this.state.isSearchOverlayVisible)
+            this.toggleSearchOverlay(false);
+          if (this.state.mode === "yt-search") this.setMode("menu");
+
+          this.startPlayer(song);
+        }
+        return; // Prevent fallthrough to playing the normal background selection!
+      }
+
+      if (this.state.reservationQueue.length)
         this.startPlayer(this.state.reservationQueue.shift());
       else {
         let song = this.state.songNumber
@@ -1885,36 +1922,42 @@ class EncoreController {
         }
       }
     } else if (this.state.mode === "player") {
-      if (
-        this.state.isSearchOverlayVisible &&
-        this.state.highlightedSearchIndex !== -1
-      ) {
-        const res = this.state.searchResults[this.state.highlightedSearchIndex];
-        const song =
-          res.type === "local"
-            ? { ...res }
-            : {
-                title: res.title,
-                artist: res.channelTitle,
-                path: `yt://${res.id}`,
-                durationText: res.length?.simpleText,
-                isLive: res.isLive,
-              };
-        this.state.reservationQueue.push(song);
-        const codeSpan = song.code
-          ? `<span class="info-bar-code">${song.code}</span>`
-          : `<span class="info-bar-code is-youtube">YT</span>`;
+      if (isSearchActive) {
+        if (this.state.highlightedSearchIndex !== -1) {
+          const res =
+            this.state.searchResults[this.state.highlightedSearchIndex];
+          const song =
+            res.type === "local"
+              ? { ...res }
+              : {
+                  title: res.title,
+                  artist: res.channelTitle,
+                  path: `yt://${res.id}`,
+                  durationText: res.length?.simpleText,
+                  isLive: res.isLive,
+                };
+          this.state.reservationQueue.push(song);
+          const codeSpan = song.code
+            ? `<span class="info-bar-code">${song.code}</span>`
+            : `<span class="info-bar-code is-youtube">YT</span>`;
 
-        // Generate Badge
-        const fmt = this.getFormatInfo(song);
-        const fmtBadge = `<span class="format-badge" style="background-color: ${fmt.color}">${fmt.label}</span>`;
+          const fmt = this.getFormatInfo(song);
+          const fmtBadge = `<span class="format-badge" style="background-color: ${fmt.color}">${fmt.label}</span>`;
 
-        this.infoBar.showTemp(
-          "RESERVED",
-          `${codeSpan} ${fmtBadge} <span class="info-bar-title">${song.title}</span>`,
-          4000,
-        );
-        this.toggleSearchOverlay(false);
+          this.infoBar.showTemp(
+            "RESERVED",
+            `${codeSpan} ${fmtBadge} <span class="info-bar-title">${song.title}</span>`,
+            4000,
+          );
+
+          this.state.highlightedSearchIndex = -1;
+          this.dom.searchInput.elm.value = "";
+          this.state.searchResults = [];
+          this.renderSearchResults();
+
+          this.toggleSearchOverlay(false);
+        }
+        return;
       } else if (this.state.reservationNumber) {
         const song = this.songMap.get(
           this.state.reservationNumber.padStart(5, "0"),
@@ -1940,6 +1983,12 @@ class EncoreController {
               durationText: res.length?.simpleText,
               isLive: res.isLive,
             };
+
+      this.state.highlightedSearchIndex = -1;
+      this.dom.searchInput.elm.value = "";
+      this.state.searchResults = [];
+      this.renderSearchResults();
+
       this.startPlayer(song);
     }
   }
@@ -1950,6 +1999,23 @@ class EncoreController {
       this.toggleSearchOverlay(false);
       return;
     }
+
+    const isInputFocused = document.activeElement === this.dom.searchInput.elm;
+    const hasResults =
+      this.dom.searchWindow.elm.classList.contains("has-results");
+
+    if (isInputFocused || hasResults || this.state.mode === "yt-search") {
+      this.dom.searchInput.elm.blur();
+      this.state.highlightedSearchIndex = -1;
+      this.state.searchResults = [];
+      this.dom.searchInput.elm.value = "";
+      this.renderSearchResults(); // Safely clears the visual results
+      if (this.state.mode === "yt-search") {
+        this.setMode("menu");
+      }
+      return;
+    }
+
     if (this.state.mode === "menu") {
       if (this.state.isTypingNumber) {
         this.state.songNumber = "";
@@ -1972,11 +2038,45 @@ class EncoreController {
         this.bgv.start();
         this.transitionAfterSong();
       } else this.Forte.stopTrack();
-    } else if (this.state.mode === "yt-search") this.setMode("menu");
+    }
   }
 
   handleNav(dir) {
-    if (this.state.mode === "menu") {
+    const isInputFocused = document.activeElement === this.dom.searchInput.elm;
+    const isSearchActive =
+      this.state.mode === "yt-search" ||
+      this.state.isSearchOverlayVisible ||
+      isInputFocused ||
+      this.dom.searchWindow.elm.classList.contains("has-results");
+
+    if (isSearchActive) {
+      const change = dir === "down" ? 1 : -1;
+
+      if (isInputFocused) {
+        if (change > 0 && this.state.searchResults.length > 0) {
+          // DOWN: blur input, select first item
+          this.dom.searchInput.elm.blur();
+          this.state.highlightedSearchIndex = 0;
+        }
+        // UP: do nothing if already focused on input
+      } else {
+        if (change < 0 && this.state.highlightedSearchIndex <= 0) {
+          // UP from first item: focus back to input
+          this.state.highlightedSearchIndex = -1;
+          this.dom.searchInput.elm.focus();
+        } else {
+          // Move up/down within the results
+          this.state.highlightedSearchIndex = Math.max(
+            0,
+            Math.min(
+              this.state.searchResults.length - 1,
+              this.state.highlightedSearchIndex + change,
+            ),
+          );
+        }
+      }
+      this.updateSearchHighlight();
+    } else if (this.state.mode === "menu") {
       const change = dir === "down" ? 1 : -1;
       this.state.songNumber = "";
       this.state.isTypingNumber = false;
@@ -1986,31 +2086,6 @@ class EncoreController {
         Math.min(this.songList.length - 1, idx),
       );
       this.updateMenuUI();
-    } else if (
-      this.state.mode === "yt-search" ||
-      this.state.isSearchOverlayVisible
-    ) {
-      const change = dir === "down" ? 1 : -1;
-      const focused = document.activeElement === this.dom.searchInput.elm;
-      if (focused && change > 0) {
-        this.dom.searchInput.elm.blur();
-        this.state.highlightedSearchIndex = 0;
-      } else if (
-        !focused &&
-        change < 0 &&
-        this.state.highlightedSearchIndex <= 0
-      ) {
-        this.state.highlightedSearchIndex = -1;
-        this.dom.searchInput.elm.focus();
-      } else
-        this.state.highlightedSearchIndex = Math.max(
-          0,
-          Math.min(
-            this.state.searchResults.length - 1,
-            this.state.highlightedSearchIndex + change,
-          ),
-        );
-      this.updateSearchHighlight();
     } else if (this.state.mode === "player") {
       // Transpose
       if (this.state.currentSongIsYouTube) return;
