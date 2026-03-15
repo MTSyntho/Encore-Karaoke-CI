@@ -1267,11 +1267,24 @@ class EncoreController {
       const renderLine = (displayEl, lineData) => {
         displayEl.clear();
         if (!lineData) return;
+
+        let currentWord = null;
+
         lineData.forEach((s) => {
+          // Calculate length to normalize the CSS highlight sweep speed
+          const charCount = s.text.length > 0 ? s.text.length : 1;
+
+          if (!currentWord || s.rawText.startsWith(" ")) {
+            currentWord = new Html("div")
+              .classOn("lyric-word")
+              .appendTo(displayEl);
+          }
+
           const container = new Html("div")
             .classOn("lyric-syllable-container")
             .attr({ "data-index": s.globalIndex })
-            .appendTo(displayEl);
+            .style({ "--char-count": charCount })
+            .appendTo(currentWord);
 
           // Render Furigana and Original text immediately
           const furiSpan = new Html("span")
@@ -1303,6 +1316,10 @@ class EncoreController {
                   .styleJs({ visibility: "visible" });
               }
             });
+          }
+
+          if (s.rawText.endsWith(" ")) {
+            currentWord = null;
           }
         });
       };
@@ -1362,6 +1379,23 @@ class EncoreController {
               nextNextLine.forEach(getRomanizationPromise);
             }
           }
+
+          // --- SMOOTH CATCH-UP LOGIC ---
+          // Find all syllables rendered on the screen. If their global index is behind the
+          // syllable that was just triggered, force them to complete catching up.
+          const allScreenSyllables = this.wrapper.qsa(
+            ".lyric-syllable-container",
+          );
+          if (allScreenSyllables) {
+            allScreenSyllables.forEach((el) => {
+              const idx = parseInt(el.elm.getAttribute("data-index"), 10);
+              if (idx < targetSyllable.globalIndex) {
+                el.classOff("active").classOn("completed");
+              }
+            });
+          }
+          // -----------------------------
+
           const newSyllableEl = this.wrapper.qs(
             `.lyric-syllable-container[data-index="${targetSyllable.globalIndex}"]`,
           );

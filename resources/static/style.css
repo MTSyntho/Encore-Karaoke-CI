@@ -1798,6 +1798,13 @@ kbd {
   margin: 0;
 }
 
+.lyric-word {
+  display: inline-flex;
+  white-space: pre;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
 .lyric-syllable-original,
 .lyric-syllable-romanized {
   position: relative;
@@ -1841,12 +1848,12 @@ kbd {
   top: 0;
   left: 0;
   width: 0;
-  color: #ffb74d; /* Use a gold/orange tint for Furigana active state to distinguish slightly, or keep white */
+  color: #ffb74d;
   text-shadow: none;
   -webkit-text-stroke: 3px #010141;
   paint-order: stroke fill;
   overflow: hidden;
-  transition: width 0.1s linear;
+  transition: width 0s;
 }
 
 /* Update original syllable to be main focus */
@@ -1878,14 +1885,21 @@ kbd {
   -webkit-text-stroke: 5px #010141;
   paint-order: stroke fill;
   overflow: hidden;
-  transition: width 0.1s linear;
+  transition: width 0s;
 }
 
-/* Trigger the wipe on all 3 elements when container is active */
 .lyric-syllable-container.active .lyric-syllable-furigana::after,
 .lyric-syllable-container.active .lyric-syllable-original::after,
 .lyric-syllable-container.active .lyric-syllable-romanized::after {
   width: 100%;
+  transition: width calc(0.05s + (var(--char-count) * 0.08s)) linear;
+}
+
+.lyric-syllable-container.completed .lyric-syllable-furigana::after,
+.lyric-syllable-container.completed .lyric-syllable-original::after,
+.lyric-syllable-container.completed .lyric-syllable-romanized::after {
+  width: 100%;
+  transition: none;
 }
 
 .lyric-syllable-original {
