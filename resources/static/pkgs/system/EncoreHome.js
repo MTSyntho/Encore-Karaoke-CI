@@ -1070,6 +1070,13 @@ class EncoreController {
       },
     });
 
+    if ("mediaSession" in navigator) {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: song.title,
+        artist: song.artist,
+      });
+    }
+
     if (this.state.currentSongIsYouTube) {
       // Fix: Ensure previous track is stopped and piano roll is hidden
       this.Forte.stopTrack();
@@ -1568,6 +1575,10 @@ class EncoreController {
     this.state.currentSongIsMV = false;
     this.state.currentSongIsYouTube = false;
     this.state.currentSongIsMultiplexed = false;
+
+    if ("mediaSession" in navigator) {
+      navigator.mediaSession.metadata = null;
+    }
   }
 
   cleanupPlayerEvents() {
