@@ -124,7 +124,7 @@ const pkg = {
         targets: terebiH1.elm,
         scale: [1, 0.75],
         opacity: [1, 0],
-        duration: 500,
+        duration: 400,
       });
 
       tl.add({
@@ -134,9 +134,9 @@ const pkg = {
           grid: [columns, rows],
           from: "center",
           ease: "outExpo",
-          duration: 200,
+          duration: 100,
         }),
-        duration: 200,
+        duration: 100,
         ease: "outExpo",
       });
     }
