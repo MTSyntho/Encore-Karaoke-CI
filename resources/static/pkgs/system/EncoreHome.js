@@ -133,8 +133,9 @@ class EncoreController {
       console.log("[LINK] Connected to server.");
     });
     this.socket.on("remotes", (allRemoteData) => {
-      this.knownRemotes = allRemoteData;
-      console.log("[LINK] Loaded remote data", this.knownRemotes);
+      this.state.knownRemotes = allRemoteData;
+      this.updateRemoteCount();
+      console.log("[LINK] Loaded remote data", this.state.knownRemotes);
     });
     this.setupSocketListeners();
 
@@ -658,12 +659,41 @@ class EncoreController {
       .appendTo(this.dom.postSongScreen);
   }
 
+  updateRemoteCount() {
+    if (this.dom.qrConnectedCount) {
+      const count = Object.keys(this.state.knownRemotes || {}).length;
+      this.dom.qrConnectedCount.text(count.toString());
+
+      if (count > 0) {
+        this.dom.qrContainer.classOn("has-remotes");
+      } else {
+        this.dom.qrContainer.classOff("has-remotes");
+      }
+    }
+  }
+
   buildQR() {
-    const qr = new Html("div")
+    this.dom.qrContainer = new Html("div")
       .classOn("qr-code-container")
       .appendTo(this.wrapper);
-    const img = new Html("img").appendTo(qr);
-    new Html("p").text("Use your phone as a remote!").appendTo(qr);
+
+    const counterBadge = new Html("div")
+      .classOn("qr-counter-badge")
+      .appendTo(this.dom.qrContainer);
+
+    counterBadge.html(
+      `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"></rect><line x1="12" y1="18" x2="12.01" y2="18"></line></svg>`,
+    );
+
+    this.dom.qrConnectedCount = new Html("span")
+      .text("0")
+      .appendTo(counterBadge);
+
+    const imgWrapper = new Html("div")
+      .classOn("qr-image-wrapper")
+      .appendTo(this.dom.qrContainer);
+    const img = new Html("img").appendTo(imgWrapper);
+
     fetch("http://127.0.0.1:9864/local_ip")
       .then((r) => r.text())
       .then((ip) => {
@@ -672,7 +702,9 @@ class EncoreController {
           src: `http://127.0.0.1:9864/qr?url=${encodeURIComponent(remoteUrl)}`,
         });
       })
-      .catch((e) => qr.classOn("hidden"));
+      .catch((e) => this.dom.qrContainer.classOn("hidden"));
+
+    this.updateRemoteCount();
   }
 
   // --- Core Logic Methods ---
@@ -2267,12 +2299,14 @@ class EncoreController {
           connectedAt: new Date(Date.now()).toISOString(),
           commandsSent: 0,
         };
+        this.updateRemoteCount();
         console.log("[LINK] New remote connected.", this.state.knownRemotes);
         this.infoBar.showTemp("LINK", "A new Remote has connected.", 5000);
       }
     });
     this.socket.on("leave", (leaveInformation) => {
       delete this.state.knownRemotes[leaveInformation.identity];
+      this.updateRemoteCount();
       console.log("[LINK] Remote disconnected.", this.state.knownRemotes);
     });
     this.socket.on("execute-command", (cmd) => {

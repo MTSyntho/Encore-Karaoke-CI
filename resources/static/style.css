@@ -1116,34 +1116,72 @@ kbd {
   border: none;
 }
 
+/* --- QR Code Display --- */
 .qr-code-container {
   position: absolute;
-  bottom: 2rem;
-  left: 2rem;
-  z-index: 11;
+  top: calc(2rem + 50px + 1rem);
+  right: 3rem;
+  z-index: 20;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 0.5rem;
-  background: rgba(0, 0, 0, 0.5);
-  padding: 0.5rem;
-  border-radius: 0.25rem;
-}
-
-.qr-code-container img {
-  width: 50px;
-  height: 50px;
-}
-
-.qr-code-container p {
-  margin: 0;
-  font-family: "Rajdhani", sans-serif;
-  font-size: 0.9rem;
-  color: rgba(255, 255, 255, 0.7);
+  pointer-events: none;
+  transition: opacity 0.3s ease;
 }
 
 .mode-player .qr-code-container,
 .mode-yt-search .qr-code-container {
-  display: none;
+  display: flex;
+}
+
+.qr-counter-badge {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: rgba(10, 10, 20, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #fff;
+  padding: 0.4rem 0.6rem;
+  border-radius: 0.5rem;
+  font-family: "Rajdhani", sans-serif;
+  font-weight: 700;
+  font-size: 1.2rem;
+  backdrop-filter: blur(5px);
+  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+  transition: all 0.3s ease;
+}
+
+.qr-code-container.has-remotes .qr-counter-badge {
+  border-color: #89cff0;
+  color: #89cff0;
+  box-shadow: 0 0 15px rgba(137, 207, 240, 0.3);
+}
+
+.qr-image-wrapper {
+  background: rgba(10, 10, 20, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 0.5rem;
+  padding: 0.5rem;
+  backdrop-filter: blur(5px);
+  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  transition:
+    border-color 0.3s ease,
+    box-shadow 0.3s ease;
+}
+
+.qr-code-container.has-remotes .qr-image-wrapper {
+  border-color: rgba(137, 207, 240, 0.4);
+}
+
+.qr-image-wrapper img {
+  width: 5.5rem;
+  height: 5.5rem;
+  display: block;
+  border-radius: 0.25rem;
+  background-color: white;
 }
 
 .overlay-ui {
