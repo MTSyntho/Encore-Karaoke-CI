@@ -83,6 +83,29 @@ const pkg = {
       )
       .appendTo(wrapper);
 
+    const setupText = new Html("div")
+      .styleJs({
+        position: "absolute",
+        bottom: "50px",
+        left: "50%",
+        transform: "translateX(-50%)",
+        color: "white",
+        mixBlendMode: "difference",
+        fontSize: "1.5rem",
+        fontFamily: "Rajdhani, sans-serif",
+        textAlign: "center",
+        opacity: 0,
+      })
+      .text("Press F2 to go into Setup")
+      .appendTo(wrapper);
+
+    anime({
+      targets: setupText.elm,
+      opacity: 1,
+      duration: 500,
+      easing: "linear",
+    });
+
     let startupSound = new Audio("/assets/audio/startup.wav");
     let hasLoaded = false;
     startupSound.addEventListener("loadeddata", () => {
@@ -160,6 +183,13 @@ const pkg = {
       Root.Security.setSecureVariable("TV_NAME", tvName);
 
       window.removeEventListener("keydown", f2BootListener);
+
+      anime({
+        targets: setupText.elm,
+        opacity: [1, 0],
+        duration: 200,
+        easing: "linear",
+      });
 
       if (shouldBootSetup) {
         await Root.Core.pkg.run("system:EncoreSetup", [], true);
