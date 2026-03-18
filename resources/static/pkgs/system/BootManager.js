@@ -14,10 +14,13 @@ const pkg = {
 
     document.body.style.backgroundColor = "white";
 
+    let shouldBootSetup =
+      sessionStorage.getItem("encore_boot_setup") === "true";
+    sessionStorage.removeItem("encore_boot_setup");
+
     let columns = Math.floor(document.body.clientWidth / 50);
     let rows = Math.floor(document.body.clientHeight / 50);
 
-    // --- Create Main UI Wrapper ---
     wrapper = new Html("div")
       .class("flex")
       .styleJs({
@@ -33,17 +36,19 @@ const pkg = {
       })
       .appendTo("body");
 
-    let tiles = new Html("div").classOn("tiles").appendTo(wrapper);
-
-    const createTile = (index) => {
-      const tile = new Html("div").classOn("tile");
-      return tile;
+    const f2BootListener = (e) => {
+      if (e.key === "F2") {
+        shouldBootSetup = true;
+        window.removeEventListener("keydown", f2BootListener);
+      }
     };
+    window.addEventListener("keydown", f2BootListener);
 
+    let tiles = new Html("div").classOn("tiles").appendTo(wrapper);
+    const createTile = (index) => new Html("div").classOn("tile");
     const createTiles = (quantity) => {
       Array.from(Array(quantity)).map((tile, index) => {
         createTile(index).appendTo(tiles);
-        console.log("tile", index);
       });
     };
 
@@ -51,7 +56,6 @@ const pkg = {
     tiles.elm.style.setProperty("--rows", rows);
     createTiles(columns * rows);
 
-    // --- Create Terebi Text Elements for Animation ---
     const terebiText = "テレビ";
     const terebiH1 = new Html("h1")
       .styleJs({
@@ -79,7 +83,6 @@ const pkg = {
       )
       .appendTo(wrapper);
 
-    // --- Sound and Animation Loading Logic ---
     let startupSound = new Audio("/assets/audio/startup.wav");
     let hasLoaded = false;
     startupSound.addEventListener("loadeddata", () => {
@@ -87,17 +90,10 @@ const pkg = {
       hasLoaded = true;
       beginAnimation();
     });
-    setTimeout(() => {
-      startupSound.load();
-    }, 16);
-
-    console.log("waiting for load");
+    setTimeout(() => startupSound.load(), 16);
 
     function beginAnimation() {
-      console.log("LOADED, beginning animation.");
-
       document.body.style.transition = "background-color 0.5s ease-in-out";
-
       const tl = anime.timeline({
         easing: "easeInOutExpo",
         complete: () => {
@@ -141,7 +137,6 @@ const pkg = {
       });
     }
 
-    // --- Load Core Services ---
     await Root.Core.pkg.run("services:SfxLib", [], true);
     await Root.Core.pkg.run("services:UiLib", [], true);
     await Root.Core.pkg.run("services:Forte", [], true);
@@ -150,15 +145,13 @@ const pkg = {
     async function checkServicesLoaded() {
       let curInterval = setInterval(() => {
         try {
-          let SfxLib = Root.Processes.getService("SfxLib").data;
-          let UiLib = Root.Processes.getService("UiLib").data;
-          let FsSvc = Root.Processes.getService("FsSvc").data;
-          let Forte = Root.Processes.getService("ForteSvc").data;
+          Root.Processes.getService("SfxLib").data;
+          Root.Processes.getService("UiLib").data;
+          Root.Processes.getService("FsSvc").data;
+          Root.Processes.getService("ForteSvc").data;
           clearInterval(curInterval);
           doEverythingElse();
-        } catch (e) {
-          console.log("One or more services are not loaded, waiting...", e);
-        }
+        } catch (e) {}
       }, 50);
     }
 
@@ -166,10 +159,15 @@ const pkg = {
       let tvName = "Encore Karaoke";
       Root.Security.setSecureVariable("TV_NAME", tvName);
 
-      await Root.Core.pkg.run("system:EncoreLoader", [], true);
+      window.removeEventListener("keydown", f2BootListener);
+
+      if (shouldBootSetup) {
+        await Root.Core.pkg.run("system:EncoreSetup", [], true);
+      } else {
+        await Root.Core.pkg.run("system:EncoreLoader", [], true);
+      }
 
       let mvT;
-
       window.addEventListener("mousemove", (e) => {
         clearTimeout(mvT);
         document.body.classList.remove("mouse-disabled");
@@ -177,11 +175,8 @@ const pkg = {
         mvT = setTimeout(() => {
           window.mouseDisabled = true;
           document.body.classList.add("mouse-disabled");
-          console.log("Mouse is inactive");
         }, 4000);
       });
-
-      return;
     }
   },
   end: async function () {

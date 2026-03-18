@@ -1,494 +1,789 @@
 import Html from "/libs/html.js";
-import settingsLib from "../../libs/settingsLib.js";
 
-let wrapper, card, Ui, Pid, Sfx, Forte, FsSvc, root;
-let currentStep = 0;
+class EncoreSetupController {
+  constructor(Root) {
+    this.Root = Root;
+    this.Pid = Root.Pid;
+    this.Ui = Root.Processes.getService("UiLib").data; // Added UiLib
+    this.Forte = Root.Processes.getService("ForteSvc").data;
+    this.FsSvc = Root.Processes.getService("FsSvc").data;
+    this.Sfx = Root.Processes.getService("SfxLib").data;
 
-// --- Config Object (Simplified for new Forte API) ---
-let config = {
-  setupComplete: false,
-  libraryPath: "",
-  audioConfig: {
-    mix: {
-      instrumental: {
-        outputDevice: null,
-        volume: 1,
-      },
-      // Vocal effects and buffer size are removed.
-      // We only need to store the mic used for scoring.
-      scoring: {
-        inputDevice: null,
-      },
-    },
-  },
-};
+    this.config = {};
+    this.micDevices = [];
+    this.playbackDevices = [];
+    this.songList = [];
 
-// --- State Management ---
-let micDevices, playbackDevices;
-let encoreLibraries = null;
-let selectedMicIndex = 0,
-  selectedPlaybackDeviceIndex = 0,
-  selectedLibraryIndex = 0;
-let mainVolume = 1.0;
-let backgroundScanInterval = null;
+    this.state = {
+      view: "auth",
+      authInput: "",
+      dashboardIndex: 0,
+      submenuIndex: 0,
+      activeMenuId: null,
+      pinChangeStep: 0,
+      newPinTemp: "",
+      isVerifying: false,
+      dialog: null, // { title, content }
+      previewingVideo: false, // Active when in Video Sync Preview mode
+    };
 
-function startBackgroundScan() {
-  if (backgroundScanInterval) return;
-  backgroundScanInterval = setInterval(async () => {
-    const foundLibs = await FsSvc.findEncoreLibraries();
-    const oldPaths = encoreLibraries?.map((l) => l.path).join(",");
-    const newPaths = foundLibs.map((l) => l.path).join(",");
-    if (oldPaths !== newPaths) {
-      encoreLibraries = foundLibs;
-      if (!encoreLibraries[selectedLibraryIndex]) {
-        selectedLibraryIndex = 0;
-      }
-      if (currentStep === 3) {
-        // Adjusted step index
-        renderStep(currentStep);
-      }
+    // Video Sync state refs
+    this.previewVideoEl = null;
+    this.offsetDisplay = null;
+    this.previewSyncFrame = null;
+
+    this.boundKeydown = this.handleKeyDown.bind(this);
+  }
+
+  async init() {
+    this.config = await window.config.getAll();
+    this.micDevices = await this.Forte.getMicDevices();
+    this.playbackDevices = await this.Forte.getPlaybackDevices();
+
+    if (this.config.libraryPath) {
+      await this.FsSvc.buildSongList(this.config.libraryPath);
+      this.songList = this.FsSvc.getSongList();
     }
-  }, 3000);
-}
 
-function stopBackgroundScan() {
-  if (backgroundScanInterval) {
-    clearInterval(backgroundScanInterval);
-    backgroundScanInterval = null;
-  }
-}
+    const foundLibs = await this.FsSvc.findEncoreLibraries();
+    const activeLib = foundLibs.find((l) => l.path === this.config.libraryPath);
+    this.currentManifest = activeLib
+      ? activeLib.manifest
+      : { title: "Unknown", description: "No metadata available." };
 
-function showDeviceModal(title, devices, onSelect) {
-  const modalBackdrop = new Html("div")
-    .class("modal-backdrop")
-    .appendTo(wrapper);
-  const modalContent = new Html("div")
-    .class("modal-content")
-    .appendTo(modalBackdrop);
-  new Html("h2").text(title).appendTo(modalContent);
-  const deviceList = new Html("div").class("modal-list").appendTo(modalContent);
-  const navRows = [];
-  devices.forEach((deviceName, index) => {
-    const deviceButton = new Html("button")
-      .class("modal-list-item")
-      .text(deviceName)
-      .on("click", () => {
-        onSelect(index);
-        closeModal();
-      })
-      .appendTo(deviceList);
-    navRows.push([deviceButton.elm]);
-  });
-  Ui.becomeTopUi(Pid, modalBackdrop);
-  Ui.init(Pid, "horizontal", navRows);
-  anime({
-    targets: modalBackdrop.elm,
-    opacity: [0, 1],
-    duration: 200,
-    easing: "easeOutQuad",
-  });
-  anime({
-    targets: modalContent.elm,
-    translateY: [50, 0],
-    opacity: [0, 1],
-    duration: 300,
-    easing: "easeOutExpo",
-    delay: 50,
-  });
-  function closeModal() {
-    Ui.giveUpUi(Pid);
-    anime({
-      targets: modalContent.elm,
-      translateY: [0, -50],
-      opacity: [1, 0],
-      duration: 200,
-      easing: "easeInExpo",
-      complete: () => {
-        modalBackdrop.cleanup();
-      },
+    this.buildSettingsMap();
+
+    this.wrapper = new Html("div").class("full-ui").appendTo("body").styleJs({
+      background: "linear-gradient(135deg, #05050A 0%, #1A1A2E 100%)",
+      color: "white",
+      fontFamily: "'Rajdhani', sans-serif",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      opacity: 0,
     });
+
+    this.Ui.becomeTopUi(this.Pid, this.wrapper);
+
+    this.container = new Html("div")
+      .classOn("setup-container")
+      .appendTo(this.wrapper);
+
+    window.addEventListener("keydown", this.boundKeydown);
+    this.renderView();
+
+    setTimeout(() => {
+      this.wrapper.styleJs({ opacity: 1 });
+      this.Ui.transition("fadeIn", this.wrapper);
+    }, 100);
   }
-}
 
-async function handleLibraryScan() {
-  renderStep(currentStep, { isScanning: true });
-  const foundLibs = await FsSvc.findEncoreLibraries();
-  encoreLibraries = foundLibs;
-  selectedLibraryIndex = 0;
-  startBackgroundScan();
-  renderStep(currentStep);
-}
+  async verifyPin(input) {
+    const pinData = this.config.security?.pinData;
+    if (!pinData) return input === "0000";
+    try {
+      const res = await fetch("http://127.0.0.1:9864/auth/verify-hash", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          password: input,
+          salt: pinData.salt,
+          hash: pinData.hash,
+        }),
+      });
+      const data = await res.json();
+      return data.valid;
+    } catch (e) {
+      console.error("PIN Verification Error:", e);
+      return false;
+    }
+  }
 
-const setupSteps = [
-  {
-    title: "Welcome to Encore!",
-    mascot: "assets/img/oobe/hoshi_hi_icon.png",
-    content: (cardBody) => {
-      new Html("p")
-        .text(
-          "Hello! Before you start singing, let's make sure everything looks and sounds perfect.",
-        )
-        .appendTo(cardBody);
-      new Html("p")
-        .text("First, does the application scaling look right to you?")
-        .appendTo(cardBody);
-    },
-    actions: (cardFooter) => {
-      const adjustBtn = new Html("button")
-        .text("Adjust Display Scale")
-        .appendTo(cardFooter)
-        .class("button-secondary")
-        .on("click", () => {
-          settingsLib.uiScaling(root.Pid, wrapper, Ui);
-        });
-      const nextBtn = new Html("button")
-        .text("Looks Good, Next!")
-        .appendTo(cardFooter)
-        .class("button-primary")
-        .on("click", nextStep);
-      return [adjustBtn.elm, nextBtn.elm];
-    },
-  },
-  {
-    title: "Microphone & Audio Setup",
-    content: (cardBody) => {
-      new Html("p")
-        .html(
-          "Select your microphone for <strong>scoring</strong> and your main audio output for music playback. <br/><strong>Note:</strong> You will not hear your own voice during this setup.",
-        )
-        .appendTo(cardBody);
+  async createPinHash(input) {
+    try {
+      const res = await fetch("http://127.0.0.1:9864/auth/create-hash", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: input }),
+      });
+      return await res.json();
+    } catch (e) {
+      console.error("PIN Creation Error:", e);
+      return null;
+    }
+  }
 
-      const inputDisplay = new Html("div")
-        .class("device-display")
-        .appendTo(cardBody);
-      const inputName = new Html("span").text(
-        micDevices[selectedMicIndex]?.label || "Default",
-      );
-      const inputBtn = new Html("button")
-        .text("Change")
-        .class("button-tertiary")
-        .on("click", () => {
-          const deviceLabels = micDevices.map((d) => d.label);
-          showDeviceModal("Select Scoring Microphone", deviceLabels, (i) => {
-            selectedMicIndex = i;
-            // --- FIX #1: Correct path to scoring object ---
-            config.audioConfig.mix.scoring.inputDevice = micDevices[i].deviceId;
-            Forte.setMicDevice(micDevices[i].deviceId);
-            renderStep(currentStep);
-          });
-        });
-      new Html("label")
-        .text("Scoring Input (Microphone)")
-        .appendTo(inputDisplay);
-      inputName.appendTo(inputDisplay);
-      inputBtn.appendTo(inputDisplay);
+  buildSettingsMap() {
+    this.DASHBOARD_TILES = [
+      { id: "library", label: "Library & Storage", icon: "📁" },
+      { id: "audio", label: "Sound Settings", icon: "🔊" },
+      { id: "mic", label: "Microphone Settings", icon: "🎤" },
+      { id: "video", label: "Video Settings", icon: "📺" },
+      { id: "security", label: "User Security", icon: "🔒" },
+      { id: "reboot", label: "System Reboot", icon: "🔄" },
+    ];
 
-      const playbackDisplay = new Html("div")
-        .class("device-display")
-        .appendTo(cardBody);
-      const playbackName = new Html("span").text(
-        playbackDevices[selectedPlaybackDeviceIndex]?.label || "Default",
-      );
-      const playbackBtn = new Html("button")
-        .text("Change")
-        .class("button-tertiary")
-        .on("click", () => {
-          const deviceLabels = playbackDevices.map((d) => d.label);
-          showDeviceModal("Select Main Audio Output", deviceLabels, (i) => {
-            selectedPlaybackDeviceIndex = i;
-            config.audioConfig.mix.instrumental.outputDevice =
-              playbackDevices[i].deviceId;
-            Forte.setPlaybackDevice(playbackDevices[i].deviceId);
-            renderStep(currentStep);
-          });
-        });
-      new Html("label").text("Main Audio Output").appendTo(playbackDisplay);
-      playbackName.appendTo(playbackDisplay);
-      playbackBtn.appendTo(playbackDisplay);
+    const micOptions = this.micDevices.map((d) => ({
+      label: d.label || "Default",
+      value: d.deviceId,
+    }));
+    const playbackOptions = this.playbackDevices.map((d) => ({
+      label: d.label || "Default",
+      value: d.deviceId,
+    }));
 
-      return [inputBtn.elm, playbackBtn.elm];
-    },
-    actions: (cardFooter) => {
-      const backBtn = new Html("button")
-        .text("Back")
-        .appendTo(cardFooter)
-        .class("button-secondary")
-        .on("click", prevStep);
-      const nextBtn = new Html("button")
-        .text("Next")
-        .appendTo(cardFooter)
-        .class("button-primary")
-        .on("click", nextStep);
-      return [backBtn.elm, nextBtn.elm];
-    },
-  },
-  {
-    title: "Volume Balance",
-    content: (cardBody) => {
-      new Html("p")
-        .text(
-          "Adjust the main volume to a comfortable level. You should hear background music to help you test.",
-        )
-        .appendTo(cardBody);
-      const sliderControl = new Html("div")
-        .class("slider-control")
-        .appendTo(cardBody);
-      const minusBtn = new Html("button")
-        .class("slider-button")
-        .text("-")
-        .on("click", () => {
-          mainVolume = Math.max(0, mainVolume - 0.05);
-          Forte.setTrackVolume(mainVolume);
-          renderStep(currentStep);
-        })
-        .appendTo(sliderControl);
-      const slider = new Html("input")
-        .attr({ type: "range", min: 0, max: 1, step: 0.01, value: mainVolume })
-        .on("input", (e) => {
-          mainVolume = parseFloat(e.target.value);
-          Forte.setTrackVolume(mainVolume);
-          document.querySelector(
-            ".volume-label",
-          ).textContent = `Main Volume: ${Math.round(mainVolume * 100)}%`;
-        })
-        .appendTo(sliderControl);
-      const plusBtn = new Html("button")
-        .class("slider-button")
-        .text("+")
-        .on("click", () => {
-          mainVolume = Math.min(1, mainVolume + 0.05);
-          Forte.setTrackVolume(mainVolume);
-          renderStep(currentStep);
-        })
-        .appendTo(sliderControl);
-      new Html("p")
-        .class("volume-label")
-        .text(`Main Volume: ${Math.round(mainVolume * 100)}%`)
-        .appendTo(cardBody);
-      return [[minusBtn.elm, slider.elm, plusBtn.elm]];
-    },
-    actions: (cardFooter) => {
-      const backBtn = new Html("button")
-        .text("Back")
-        .appendTo(cardFooter)
-        .class("button-secondary")
-        .on("click", prevStep);
-      const nextBtn = new Html("button")
-        .text("Next")
-        .appendTo(cardFooter)
-        .class("button-primary")
-        .on("click", nextStep);
-      return [backBtn.elm, nextBtn.elm];
-    },
-  },
-  {
-    title: "Song Library",
-    content: (cardBody, flags) => {
-      if (flags?.isScanning) {
-        new Html("div").class("spinner").appendTo(cardBody);
-        new Html("p").text("Scanning...").appendTo(cardBody);
-        return [];
-      }
-      if (encoreLibraries === null) {
-        new Html("p")
-          .text("Plug in your drive with an 'EncoreLibrary' folder.")
-          .appendTo(cardBody);
-        const s = new Html("button")
-          .text("Scan for Libraries")
-          .class("button-primary")
-          .on("click", handleLibraryScan)
-          .appendTo(cardBody);
-        return [s.elm];
-      }
-      if (encoreLibraries.length === 0) {
-        new Html("p").text("No song libraries found.").appendTo(cardBody);
-        new Html("p")
-          .text(
-            "Please check your drive connection. We'll detect new libraries automatically.",
-          )
-          .appendTo(cardBody);
-        new Html("div").class("spinner").appendTo(cardBody);
-        return [];
-      }
-      const selectedLib = encoreLibraries[selectedLibraryIndex];
-      const libraryCard = new Html("div")
-        .class("library-card")
-        .appendTo(cardBody);
-      const header = new Html("div")
-        .class("library-header")
-        .appendTo(libraryCard);
-      new Html("h3").text(selectedLib.manifest.title).appendTo(header);
-      new Html("p")
-        .class("library-path")
-        .text(selectedLib.path)
-        .appendTo(header);
-      new Html("p")
-        .class("library-desc")
-        .text(selectedLib.manifest.description)
-        .appendTo(libraryCard);
-      const changeBtn = new Html("button")
-        .text("Change Library")
-        .class("button-primary")
-        .on("click", () => {
-          const libraryTitles = encoreLibraries.map(
-            (lib) => lib.manifest.title,
+    this.SUBMENUS = {
+      library: {
+        title: "Library Configuration",
+        items: [
+          {
+            id: "title",
+            label: "Library Name",
+            type: "info",
+            get: () => this.currentManifest?.title || "Unknown",
+          },
+          {
+            id: "desc",
+            label: "Description",
+            type: "info-action",
+            get: () => this.currentManifest?.description || "N/A",
+            action: () => {
+              this.state.dialog = {
+                title: "Library Description",
+                content:
+                  this.currentManifest?.description ||
+                  "No description provided by this library.",
+              };
+              this.renderView();
+            },
+          },
+          {
+            id: "path",
+            label: "Path",
+            type: "info",
+            get: () => this.config.libraryPath || "Not Set",
+          },
+          {
+            id: "scan",
+            label: "Rescan & Change Library",
+            type: "action",
+            action: async () => await this.handleLibraryScan(),
+          },
+        ],
+      },
+      audio: {
+        title: "Sound Settings",
+        items: [
+          {
+            id: "out_device",
+            label: "Main Audio Output",
+            type: "select",
+            options: playbackOptions,
+            get: () =>
+              this.config.audioConfig?.mix?.instrumental?.outputDevice ||
+              "default",
+            set: (v) => {
+              this.config.audioConfig ??= {};
+              this.config.audioConfig.mix ??= {};
+              this.config.audioConfig.mix.instrumental ??= {};
+              this.config.audioConfig.mix.instrumental.outputDevice = v;
+              window.config.setItem(
+                "audioConfig.mix.instrumental.outputDevice",
+                v,
+              );
+              this.Forte.setPlaybackDevice(v);
+            },
+          },
+          {
+            id: "test",
+            label: "Test Audio Output",
+            type: "action",
+            action: () => {
+              this.Forte.playSfx("/assets/audio/fanfare.mp3");
+              this.showToast("PLAYING TEST SOUND...", "info");
+            },
+          },
+          {
+            id: "vol",
+            label: "Master Volume",
+            type: "range",
+            min: 0,
+            max: 100,
+            step: 5,
+            get: () =>
+              Math.round(
+                (this.config.audioConfig?.mix?.instrumental?.volume ?? 1) * 100,
+              ),
+            set: (v) => {
+              const val = v / 100;
+              this.config.audioConfig ??= {};
+              this.config.audioConfig.mix ??= {};
+              this.config.audioConfig.mix.instrumental ??= {};
+              this.config.audioConfig.mix.instrumental.volume = val;
+              window.config.setItem("audioConfig.mix.instrumental.volume", val);
+              this.Forte.setTrackVolume(val);
+            },
+          },
+        ],
+      },
+      mic: {
+        title: "Microphone Settings",
+        items: [
+          {
+            id: "device",
+            label: "Scoring Input Device",
+            type: "select",
+            options: micOptions,
+            get: () =>
+              this.config.audioConfig?.mix?.scoring?.inputDevice || "default",
+            set: (v) => {
+              this.config.audioConfig ??= {};
+              this.config.audioConfig.mix ??= {};
+              this.config.audioConfig.mix.scoring ??= {};
+              this.config.audioConfig.mix.scoring.inputDevice = v;
+              window.config.setItem("audioConfig.mix.scoring.inputDevice", v);
+              this.Forte.setMicDevice(v);
+            },
+          },
+          {
+            id: "latency",
+            label: "Mic Latency Override (ms)",
+            type: "range",
+            min: 0,
+            max: 1000,
+            step: 10,
+            get: () =>
+              Math.round((this.config.audioConfig?.micLatency ?? 0) * 1000),
+            set: (v) => {
+              const val = v / 1000;
+              this.config.audioConfig ??= {};
+              this.config.audioConfig.micLatency = val;
+              window.config.setItem("audioConfig.micLatency", val);
+              this.Forte.setLatency(val);
+            },
+          },
+        ],
+      },
+      video: {
+        title: "Video Settings",
+        items: [
+          {
+            id: "sync",
+            label: "Video Sync Offset (ms)",
+            type: "range",
+            min: -1000,
+            max: 1000,
+            step: 10,
+            get: () => this.config.videoConfig?.syncOffset ?? 0,
+            set: (v) => {
+              this.config.videoConfig ??= {};
+              this.config.videoConfig.syncOffset = v;
+              window.config.setItem("videoConfig.syncOffset", v);
+            },
+          },
+          {
+            id: "preview",
+            label: "Preview & Calibrate Sync",
+            type: "action",
+            action: () => this.startVideoPreview(),
+          },
+        ],
+      },
+    };
+  }
+
+  handleKeyDown(e) {
+    if (this.state.previewingVideo) {
+      if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+        const dir = e.key === "ArrowRight" ? 1 : -1;
+        const currentOffset = this.config.videoConfig?.syncOffset || 0;
+        const newOffset = Math.max(
+          -1000,
+          Math.min(1000, currentOffset + 10 * dir),
+        );
+
+        this.config.videoConfig ??= {};
+        this.config.videoConfig.syncOffset = newOffset;
+        window.config.setItem("videoConfig.syncOffset", newOffset);
+
+        if (this.offsetDisplay) {
+          this.offsetDisplay.text(
+            `OFFSET: ${newOffset > 0 ? "+" : ""}${newOffset} ms`,
           );
-          showDeviceModal("Select a Song Library", libraryTitles, (i) => {
-            selectedLibraryIndex = i;
-            renderStep(currentStep);
-          });
-        })
-        .appendTo(cardBody);
-      return [changeBtn.elm];
-    },
-    actions: (cardFooter) => {
-      const backBtn = new Html("button")
-        .text("Back")
-        .appendTo(cardFooter)
-        .class("button-secondary")
-        .on("click", prevStep);
-      const nextBtn = new Html("button")
-        .text("Next")
-        .appendTo(cardFooter)
-        .class("button-primary")
-        .on("click", nextStep);
-      return [backBtn.elm, nextBtn.elm];
-    },
-  },
-  {
-    title: "You're All Set!",
-    content: (cardBody) => {
-      new Html("p")
-        .text("Encore is now configured for your system.")
-        .appendTo(cardBody);
-      const selectedLib = encoreLibraries?.[selectedLibraryIndex];
-      if (selectedLib) {
-        new Html("p")
-          .html(
-            `Your song library is set to: <strong>${selectedLib.manifest.title}</strong>`,
-          )
-          .appendTo(cardBody);
-      } else {
-        new Html("p")
-          .text("No song library was selected. You can add one later.")
-          .appendTo(cardBody);
+        }
+      } else if (e.key === "Enter" || e.key === "Escape") {
+        this.stopVideoPreview();
       }
-      new Html("p").text("Enjoy the show! ✨").appendTo(cardBody);
-    },
-    actions: (cardFooter) => {
-      const backBtn = new Html("button")
-        .text("Back")
-        .appendTo(cardFooter)
-        .class("button-secondary")
-        .on("click", prevStep);
-      const finishBtn = new Html("button")
-        .text("Start Singing!")
-        .appendTo(cardFooter)
-        .class("button-primary")
-        .on("click", finishSetup);
-      return [backBtn.elm, finishBtn.elm];
-    },
-  },
-];
-
-function nextStep() {
-  if (currentStep < setupSteps.length - 1) {
-    renderStep(currentStep + 1);
-  }
-}
-function prevStep() {
-  if (currentStep > 0) {
-    renderStep(currentStep - 1);
-  }
-}
-async function finishSetup() {
-  const selectedLib = encoreLibraries?.[selectedLibraryIndex];
-  config.setupComplete = true;
-  config.libraryPath = selectedLib?.path || "";
-  config.audioConfig.mix.instrumental.volume = mainVolume;
-  // --- FIX #2: Correct path to scoring object ---
-  config.audioConfig.mix.scoring.inputDevice =
-    micDevices[selectedMicIndex]?.deviceId || "default";
-
-  console.log("Setup Finished! Final config:", config);
-
-  await window.desktopIntegration.ipc.send("updateConfig", config);
-
-  Sfx.playSfx("game_start.wav");
-  root.end();
-}
-
-async function renderStep(stepIndex, flags = {}) {
-  currentStep = stepIndex;
-  const step = setupSteps[currentStep];
-
-  window.desktopIntegration !== undefined &&
-    window.desktopIntegration.ipc.send("setRPC", {
-      details: `Setting up for the first time...`,
-      state: `Step ${currentStep + 1} of ${setupSteps.length}`,
-    });
-
-  if (
-    step.title === "Song Library" &&
-    encoreLibraries === null &&
-    !flags.isScanning
-  ) {
-    handleLibraryScan();
-    return;
-  } else if (step.title === "Song Library") {
-    startBackgroundScan();
-  } else {
-    stopBackgroundScan();
-  }
-
-  const oldHeight = card.elm ? card.elm.offsetHeight : 0;
-  card.clear();
-  let progress = new Html("div").class("progress-tracker").appendTo(card);
-  for (let i = 0; i < setupSteps.length; i++) {
-    let indicator = new Html("div").class("step-indicator").appendTo(progress);
-    if (i === currentStep) indicator.classOn("active");
-  }
-  let header = new Html("div").class("card-header").appendTo(card);
-  if (step.mascot) {
-    new Html("img")
-      .attr({ src: step.mascot })
-      .class("mascot-avatar")
-      .appendTo(header);
-  }
-  new Html("h1").text(step.title).appendTo(header);
-  let body = new Html("div").class("card-body").appendTo(card);
-  let footer = new Html("div").class("card-footer").appendTo(card);
-
-  const contentElements = step.content(body, flags) || [];
-  const actionElements = step.actions(footer) || [];
-  Ui.becomeTopUi(Pid, wrapper);
-  const navRows = [];
-  contentElements.forEach((elm) => {
-    if (Array.isArray(elm)) {
-      navRows.push(elm);
-    } else {
-      navRows.push([elm]);
+      return;
     }
-  });
-  if (actionElements.length > 0) {
-    navRows.push(actionElements);
-  }
-  Ui.init(Pid, "horizontal", navRows);
 
-  const newHeight = card.elm.scrollHeight;
-  if (oldHeight > 0 && !flags.isScanning) {
-    card.elm.style.height = `${oldHeight}px`;
-    anime({
-      targets: card.elm,
-      height: [oldHeight, newHeight],
-      duration: 300,
-      easing: "cubicBezier(0.79,0.14,0.15,0.86)",
-      complete: () => {
-        card.elm.style.height = "auto";
-      },
+    if (this.state.dialog) {
+      if (e.key === "Enter" || e.key === "Escape") {
+        this.state.dialog = null;
+        this.renderView();
+      }
+      return;
+    }
+
+    if (e.key === "Escape") {
+      if (this.state.view === "submenu" || this.state.view === "pin_change") {
+        this.state.view = "dashboard";
+        this.renderView();
+      } else if (
+        this.state.view === "dashboard" ||
+        this.state.view === "auth"
+      ) {
+        this.executeAction("reboot");
+      }
+      return;
+    }
+
+    if (this.state.view === "auth" || this.state.view === "pin_change") {
+      if (this.state.isVerifying) return;
+
+      if (e.key >= "0" && e.key <= "9") {
+        if (this.state.authInput.length >= 4) return;
+        this.Sfx.playSfx(`/assets/audio/numbers/${e.key}.wav`);
+        this.state.authInput += e.key;
+        this.renderView();
+
+        if (this.state.authInput.length === 4) {
+          this.state.isVerifying = true;
+          setTimeout(() => this.processAuth(), 200);
+        }
+      } else if (e.key === "Backspace") {
+        this.state.authInput = this.state.authInput.slice(0, -1);
+        this.renderView();
+      }
+      return;
+    }
+
+    if (this.state.view === "dashboard") {
+      const cols = 3;
+      const total = this.DASHBOARD_TILES.length;
+      if (e.key === "ArrowRight")
+        this.state.dashboardIndex = (this.state.dashboardIndex + 1) % total;
+      if (e.key === "ArrowLeft")
+        this.state.dashboardIndex =
+          (this.state.dashboardIndex - 1 + total) % total;
+      if (e.key === "ArrowDown")
+        this.state.dashboardIndex = Math.min(
+          total - 1,
+          this.state.dashboardIndex + cols,
+        );
+      if (e.key === "ArrowUp")
+        this.state.dashboardIndex = Math.max(
+          0,
+          this.state.dashboardIndex - cols,
+        );
+      if (e.key === "Enter") {
+        const selected = this.DASHBOARD_TILES[this.state.dashboardIndex];
+        this.executeAction(selected.id);
+      }
+      this.renderView();
+      return;
+    }
+
+    if (this.state.view === "submenu") {
+      const menu = this.SUBMENUS[this.state.activeMenuId];
+      const items = menu.items;
+      const currentItem = items[this.state.submenuIndex];
+
+      if (e.key === "ArrowDown") {
+        this.state.submenuIndex = Math.min(
+          items.length - 1,
+          this.state.submenuIndex + 1,
+        );
+      } else if (e.key === "ArrowUp") {
+        this.state.submenuIndex = Math.max(0, this.state.submenuIndex - 1);
+      } else if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+        if (currentItem.type === "range") {
+          const dir = e.key === "ArrowRight" ? 1 : -1;
+          const newVal = Math.max(
+            currentItem.min,
+            Math.min(
+              currentItem.max,
+              currentItem.get() + currentItem.step * dir,
+            ),
+          );
+          currentItem.set(newVal);
+        } else if (currentItem.type === "select") {
+          const dir = e.key === "ArrowRight" ? 1 : -1;
+          const currentVal = currentItem.get();
+          const currentIndex = currentItem.options.findIndex(
+            (o) => o.value === currentVal,
+          );
+          const nextIndex =
+            (currentIndex + dir + currentItem.options.length) %
+            currentItem.options.length;
+          currentItem.set(currentItem.options[nextIndex].value);
+        }
+      } else if (
+        e.key === "Enter" &&
+        (currentItem.type === "action" || currentItem.type === "info-action")
+      ) {
+        currentItem.action();
+      }
+      this.renderView();
+    }
+  }
+
+  async processAuth() {
+    if (this.state.view === "auth") {
+      const isValid = await this.verifyPin(this.state.authInput);
+      if (isValid) {
+        this.state.view = "dashboard";
+      } else {
+        this.showToast("INCORRECT PIN", "error");
+      }
+      this.state.authInput = "";
+    } else if (this.state.view === "pin_change") {
+      if (this.state.pinChangeStep === 0) {
+        const isValid = await this.verifyPin(this.state.authInput);
+        if (isValid) {
+          this.state.pinChangeStep = 1;
+        } else {
+          this.state.pinChangeStep = 0;
+          this.state.view = "dashboard";
+          this.showToast("AUTHORIZATION FAILED", "error");
+        }
+        this.state.authInput = "";
+      } else if (this.state.pinChangeStep === 1) {
+        this.state.newPinTemp = this.state.authInput;
+        this.state.pinChangeStep = 2;
+        this.state.authInput = "";
+      } else if (this.state.pinChangeStep === 2) {
+        if (this.state.authInput === this.state.newPinTemp) {
+          const newPinData = await this.createPinHash(this.state.authInput);
+          if (newPinData) {
+            this.config.security ??= {};
+            this.config.security.pinData = newPinData;
+            window.config.setItem("security.pinData", newPinData);
+            this.showToast("PIN UPDATED", "success");
+          } else {
+            this.showToast("HASHING FAILED", "error");
+          }
+        } else {
+          this.showToast("PIN MISMATCH", "error");
+        }
+        this.state.view = "dashboard";
+        this.state.authInput = "";
+      }
+    }
+    this.state.isVerifying = false;
+    this.renderView();
+  }
+
+  executeAction(id) {
+    if (id === "reboot") {
+      // Create a massive black overlay over everything for a seamless fade to black
+      const fadeOverlay = new Html("div")
+        .styleJs({
+          position: "fixed",
+          top: 0,
+          left: 0,
+          width: "100vw",
+          height: "100vh",
+          backgroundColor: "black",
+          zIndex: 99999,
+          opacity: 0,
+          pointerEvents: "all",
+        })
+        .appendTo(document.body);
+
+      if (typeof anime !== "undefined") {
+        anime({
+          targets: fadeOverlay.elm,
+          opacity: [0, 1],
+          duration: 600,
+          easing: "easeInOutQuad",
+          complete: () => window.location.reload(),
+        });
+      } else {
+        window.location.reload();
+      }
+    } else if (id === "security") {
+      this.state.view = "pin_change";
+      this.state.pinChangeStep = 0;
+      this.state.authInput = "";
+    } else if (this.SUBMENUS[id]) {
+      this.state.activeMenuId = id;
+      this.state.submenuIndex = 0;
+      this.state.view = "submenu";
+    }
+  }
+
+  async handleLibraryScan() {
+    this.showToast("SCANNING DRIVES...", "info");
+    const foundLibs = await this.FsSvc.findEncoreLibraries();
+    if (foundLibs.length === 0) {
+      this.showToast("NO LIBRARIES FOUND", "error");
+      return;
+    }
+
+    const newLib = foundLibs[0];
+    this.config.libraryPath = newLib.path;
+    this.currentManifest = newLib.manifest;
+    window.config.setItem("libraryPath", newLib.path);
+
+    // Refresh the song list based on the new library
+    await this.FsSvc.buildSongList(newLib.path);
+    this.songList = this.FsSvc.getSongList();
+
+    this.showToast(`LIBRARY SET TO: ${newLib.manifest.title}`, "success");
+    this.renderView();
+  }
+
+  async startVideoPreview() {
+    if (!this.songList || this.songList.length === 0) {
+      this.showToast("LIBRARY EMPTY OR NOT LOADED", "error");
+      return;
+    }
+
+    // Find a track that specifically has an MTV
+    const mtvSong = this.songList.find((s) => s.videoPath);
+    if (!mtvSong) {
+      this.showToast("NO MTV SONGS FOUND IN LIBRARY", "error");
+      return;
+    }
+
+    this.state.previewingVideo = true;
+    this.renderView();
+
+    const audioUrl = new URL("http://127.0.0.1:9864/getFile");
+    audioUrl.searchParams.append("path", mtvSong.path);
+
+    this.showToast("LOADING TRACK...", "info");
+    await this.Forte.loadTrack(audioUrl.href);
+
+    const videoUrl = new URL("http://127.0.0.1:9864/getFile");
+    videoUrl.searchParams.append("path", mtvSong.videoPath);
+
+    this.previewVideoEl.attr({ src: videoUrl.href });
+    this.previewVideoEl.elm.play().catch((e) => console.error(e));
+
+    this.Forte.playTrack();
+    this.previewSyncFrame = requestAnimationFrame(() => this.syncVideoLoop());
+  }
+
+  syncVideoLoop() {
+    if (!this.state.previewingVideo) return;
+    const pbState = this.Forte.getPlaybackState();
+
+    if (
+      pbState.status === "playing" &&
+      this.previewVideoEl &&
+      this.previewVideoEl.elm.readyState >= 2
+    ) {
+      const vid = this.previewVideoEl.elm;
+      const offsetSec = (this.config.videoConfig?.syncOffset || 0) / 1000;
+      const target = pbState.currentTime + offsetSec;
+      const drift = (target - vid.currentTime) * 1000;
+
+      if (Math.abs(drift) > 500) {
+        vid.currentTime = target;
+        vid.playbackRate = 1;
+      } else if (Math.abs(drift) > 50) {
+        vid.playbackRate = drift > 0 ? 1.05 : 0.95;
+      } else {
+        vid.playbackRate = 1;
+      }
+    }
+
+    this.previewSyncFrame = requestAnimationFrame(() => this.syncVideoLoop());
+  }
+
+  stopVideoPreview() {
+    this.state.previewingVideo = false;
+    if (this.previewSyncFrame) cancelAnimationFrame(this.previewSyncFrame);
+
+    this.Forte.stopTrack();
+    if (this.previewVideoEl) {
+      this.previewVideoEl.elm.pause();
+      this.previewVideoEl.attr({ src: "" });
+    }
+    this.renderView();
+  }
+
+  showToast(msg, type) {
+    const toast = new Html("div")
+      .classOn("setup-toast", type)
+      .text(msg)
+      .appendTo(this.wrapper);
+    setTimeout(() => toast.classOn("visible"), 50);
+    setTimeout(() => {
+      toast.classOff("visible");
+      setTimeout(() => toast.cleanup(), 300);
+    }, 3000);
+  }
+
+  renderView() {
+    this.container.clear();
+
+    if (this.state.previewingVideo) {
+      this.renderVideoPreviewOverlay(this.container);
+      return;
+    }
+
+    const header = new Html("div")
+      .classOn("setup-header")
+      .appendTo(this.container);
+    new Html("h1").text("ENCORE SYSTEM CONFIGURATION").appendTo(header);
+
+    const body = new Html("div").classOn("setup-body").appendTo(this.container);
+
+    if (this.state.view === "auth" || this.state.view === "pin_change") {
+      this.renderAuthScreen(body);
+    } else if (this.state.view === "dashboard") {
+      this.renderDashboard(body);
+    } else if (this.state.view === "submenu") {
+      this.renderSubmenu(body);
+    }
+
+    const footer = new Html("div")
+      .classOn("setup-footer")
+      .appendTo(this.container);
+    let hint = "ARROWS: Navigate | ENTER: Select";
+    if (this.state.view === "submenu" || this.state.view === "pin_change")
+      hint += " | ESC: Back";
+    if (this.state.view === "auth")
+      hint = "Enter 4-digit PIN using number keys | ESC: Exit Setup";
+    new Html("p").text(hint).appendTo(footer);
+
+    if (this.state.dialog) {
+      this.renderDialog(this.container);
+    }
+  }
+
+  renderVideoPreviewOverlay(container) {
+    const overlay = new Html("div")
+      .classOn("setup-video-preview-overlay")
+      .appendTo(container);
+    this.previewVideoEl = new Html("video")
+      .attr({ muted: true })
+      .classOn("setup-preview-video")
+      .appendTo(overlay);
+
+    const hud = new Html("div").classOn("setup-preview-hud").appendTo(overlay);
+    new Html("h2").text("VIDEO SYNC CALIBRATION").appendTo(hud);
+
+    const currentOffset = this.config.videoConfig?.syncOffset || 0;
+    this.offsetDisplay = new Html("div")
+      .classOn("setup-preview-offset")
+      .text(`OFFSET: ${currentOffset > 0 ? "+" : ""}${currentOffset} ms`)
+      .appendTo(hud);
+
+    new Html("p").text("◀ / ▶ to adjust | ENTER / ESC to save").appendTo(hud);
+  }
+
+  renderDialog(container) {
+    const overlay = new Html("div")
+      .classOn("setup-dialog-overlay")
+      .appendTo(container);
+    const box = new Html("div").classOn("setup-dialog-box").appendTo(overlay);
+
+    new Html("h2").text(this.state.dialog.title).appendTo(box);
+    new Html("div")
+      .classOn("setup-dialog-content")
+      .text(this.state.dialog.content)
+      .appendTo(box);
+    new Html("p")
+      .classOn("setup-dialog-hint")
+      .text("Press ENTER or ESC to close")
+      .appendTo(box);
+  }
+
+  renderAuthScreen(container) {
+    const authBox = new Html("div").classOn("auth-box").appendTo(container);
+
+    let title = "SYSTEM AUTHENTICATION";
+    let sub = "ENTER CURRENT PIN CODE";
+
+    if (this.state.view === "pin_change") {
+      if (this.state.pinChangeStep === 1) {
+        title = "CHANGE PIN";
+        sub = "ENTER NEW 4-DIGIT PIN";
+      }
+      if (this.state.pinChangeStep === 2) {
+        title = "CHANGE PIN";
+        sub = "CONFIRM NEW PIN";
+      }
+    }
+
+    new Html("h2").text(title).appendTo(authBox);
+    new Html("p").text(sub).appendTo(authBox);
+
+    const dotsWrapper = new Html("div").classOn("auth-dots").appendTo(authBox);
+    for (let i = 0; i < 4; i++) {
+      const dot = new Html("div").classOn("auth-dot").appendTo(dotsWrapper);
+      if (i < this.state.authInput.length) dot.classOn("filled");
+    }
+  }
+
+  renderDashboard(container) {
+    const grid = new Html("div").classOn("setup-grid").appendTo(container);
+    this.DASHBOARD_TILES.forEach((tile, idx) => {
+      const tileEl = new Html("div").classOn("setup-tile").appendTo(grid);
+      if (idx === this.state.dashboardIndex) tileEl.classOn("active");
+
+      new Html("div")
+        .classOn("setup-tile-icon")
+        .text(tile.icon)
+        .appendTo(tileEl);
+      new Html("div")
+        .classOn("setup-tile-label")
+        .text(tile.label)
+        .appendTo(tileEl);
     });
-  } else {
-    card.elm.style.height = "auto";
+  }
+
+  renderSubmenu(container) {
+    const menuData = this.SUBMENUS[this.state.activeMenuId];
+
+    const panel = new Html("div").classOn("submenu-panel").appendTo(container);
+    new Html("h2")
+      .classOn("submenu-title")
+      .text(menuData.title)
+      .appendTo(panel);
+
+    const list = new Html("div").classOn("submenu-list").appendTo(panel);
+    menuData.items.forEach((item, idx) => {
+      const row = new Html("div").classOn("submenu-item").appendTo(list);
+      if (idx === this.state.submenuIndex) row.classOn("active");
+
+      new Html("div").classOn("submenu-label").text(item.label).appendTo(row);
+
+      const valWrap = new Html("div").classOn("submenu-value").appendTo(row);
+
+      if (item.type === "info") {
+        valWrap.html(`<span class="info-text">${item.get()}</span>`);
+      } else if (item.type === "info-action") {
+        valWrap.html(
+          `<span class="info-text">${item.get()}</span> <span style="opacity: 0.5; font-size: 0.8em; margin-left: 10px;">↵</span>`,
+        );
+      } else if (item.type === "action") {
+        valWrap.text("Press Enter to execute");
+      } else if (item.type === "range") {
+        const val = item.get();
+        const p = ((val - item.min) / (item.max - item.min)) * 100;
+        valWrap.html(
+          `<div class="setup-slider-bar"><div class="setup-slider-fill" style="width: ${p}%"></div></div><span>${val}</span>`,
+        );
+      } else if (item.type === "select") {
+        const val = item.get();
+        const opt = item.options.find((o) => o.value === val);
+        valWrap.html(
+          `<span>◀</span> <span class="select-text">${opt ? opt.label : val}</span> <span>▶</span>`,
+        );
+      }
+    });
+  }
+
+  destroy() {
+    window.removeEventListener("keydown", this.boundKeydown);
+    if (this.previewSyncFrame) cancelAnimationFrame(this.previewSyncFrame);
+    this.Ui.giveUpUi(this.Pid);
+    this.wrapper.cleanup();
   }
 }
 
@@ -497,91 +792,12 @@ const pkg = {
   type: "app",
   privs: 0,
   start: async function (Root) {
-    root = Root;
-    Pid = Root.Pid;
-    Ui = Root.Processes.getService("UiLib").data;
-    Sfx = Root.Processes.getService("SfxLib").data;
-    Forte = Root.Processes.getService("ForteSvc").data;
-    FsSvc = Root.Processes.getService("FsSvc").data;
-
-    [micDevices, playbackDevices] = await Promise.all([
-      Forte.getMicDevices(),
-      Forte.getPlaybackDevices(),
-    ]);
-
-    const initialPlaybackState = Forte.getPlaybackState();
-    selectedPlaybackDeviceIndex = playbackDevices.findIndex(
-      (d) => d.deviceId === initialPlaybackState.currentDeviceId,
-    );
-    if (selectedPlaybackDeviceIndex === -1) selectedPlaybackDeviceIndex = 0;
-
-    selectedMicIndex = micDevices.findIndex((d) => d.deviceId === "default");
-    if (selectedMicIndex === -1) selectedMicIndex = 0;
-
-    wrapper = new Html("div").class("full-ui").appendTo("body").styleJs({
-      background: "linear-gradient(135deg, #E0F7FA 0%, #F8E8FF 100%)",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-    });
-    new Html("style")
-      .text(
-        `
-      .onboarding-card { background-color: rgba(20, 20, 30, 0.85); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.1); box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37); border-radius: 1rem; padding: 2rem; width: clamp(300px, 60%, 800px); display: flex; flex-direction: column; gap: 1.5rem; color: white; }
-      .progress-tracker { display: flex; gap: 0.5rem; justify-content: center; } .step-indicator { width: 1rem; height: 1rem; background-color: rgba(255,255,255,0.2); border-radius: 50%; transition: all 0.3s ease; } .step-indicator.active { background-color: #89CFF0; transform: scale(1.2); } .card-header { display: flex; align-items: center; gap: 1rem; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 1rem; } .mascot-avatar { width: 60px; height: 60px; border-radius: 50%; object-fit: cover; } .card-header h1 { font-size: 2.5rem; margin: 0; } .card-body { font-size: 1.1rem; line-height: 1.6; text-align: center; } .card-footer { display: flex; justify-content: flex-end; gap: 1rem; margin-top: 1rem; }
-      .button-primary, .button-secondary, .button-tertiary { border: none; padding: 0.8rem 1.5rem; font-size: 1rem; border-radius: 0.25rem; cursor: pointer; transition: all 0.2s ease; }
-      .button-primary { background-color: #89CFF0; color: #14141E; font-weight: bold; } .button-primary:hover { transform: translateY(-2px); box-shadow: 0 4px 10px -2px #89CFF088; }
-      .button-secondary { background-color: rgba(255,255,255,0.1); color: white; } .button-secondary:hover { background-color: rgba(255,255,255,0.2); }
-      .button-tertiary { background-color: transparent; border: 1px solid rgba(255,255,255,0.3); color: white; padding: 0.5rem 1rem; } .button-tertiary:hover { background-color: rgba(255,255,255,0.1); }
-      .device-display { display: grid; grid-template-columns: 1fr auto; grid-template-rows: auto auto; align-items: center; text-align: left; gap: 0.5rem 1rem; padding: 1rem; background: rgba(0,0,0,0.2); border-radius: 0.25rem; margin-top: 1.5rem; }
-      .device-display label { font-weight: bold; font-size: 0.9rem; opacity: 0.7; grid-column: 1 / -1; }
-      .device-display span { font-size: 1.1rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .device-display button { grid-row: 2; grid-column: 2; }
-      .slider-control-group { text-align: left; background: rgba(0,0,0,0.2); border-radius: 0.25rem; padding: 1rem; margin-top: 1.5rem; }
-      .slider-control { display: flex; align-items: center; gap: 1rem; margin-top: 0.5rem; }
-      .slider-button { font-size: 1.5rem; width: 40px; height: 40px; padding: 0; line-height: 40px; border-radius: 0.25rem; background-color: rgba(255,255,255,0.1); color: white; } .slider-button:hover { background-color: rgba(255,255,255,0.2); }
-      .slider-control .value-display { flex-grow: 1; text-align: center; font-size: 1.2rem; font-weight: bold; padding: 0.5rem; background-color: rgba(0,0,0,0.2); border-radius: 0.25rem; }
-      .slider-control input[type=range] { flex-grow: 1; cursor: pointer; }
-      .volume-label { font-weight: bold; margin-top: 1rem; }
-      .library-card { text-align: left; background: rgba(0,0,0,0.2); border-radius: 0.25rem; padding: 1.5rem; margin-top: 1rem; }
-      .library-header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 0.5rem 1rem; }
-      .library-header h3 { margin: 0; font-size: 1.5rem; } .library-path { font-size: 0.9rem; opacity: 0.6; }
-      .library-desc { font-size: 1rem; opacity: 0.8; margin-top: 1rem; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 1rem; }
-      .modal-backdrop { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); backdrop-filter: blur(5px); display: flex; align-items: center; justify-content: center; z-index: 1000; }
-      .modal-content { background: #1C1C2E; border-radius: 0.25rem; padding: 2rem; width: clamp(300px, 50%, 600px); max-height: 80%; display: flex; flex-direction: column; border: 1px solid rgba(255, 255, 255, 0.1); }
-      .modal-content h2 { margin-top: 0; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 1rem; }
-      .modal-list { overflow-y: auto; display: flex; flex-direction: column; gap: 0.5rem; }
-      .modal-list-item { background: transparent; border: none; color: white; padding: 1rem; font-size: 1.1rem; text-align: left; border-radius: 0.25rem; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .modal-list-item:hover { background: rgba(255,255,255,0.1); }
-      .card-body .spinner { width: 40px; height: 40px; border: 4px solid rgba(255,255,255,0.2); border-top-color: #89CFF0; border-radius: 50%; animation: spin 1s linear infinite; margin: 1rem auto; } @keyframes spin { to { transform: rotate(360deg); } }
-      .card-body > .button-primary { display: block; margin: 1.5rem auto 0; }
-    `,
-      )
-      .appendTo(wrapper);
-
-    card = new Html("div").class("onboarding-card").appendTo(wrapper);
-    renderStep(currentStep);
-    anime({
-      targets: card.elm,
-      translateY: [50, 0],
-      opacity: [0, 1],
-      duration: 500,
-      easing: "easeOutExpo",
-    });
+    const controller = new EncoreSetupController(Root);
+    await controller.init();
+    Root.controller = controller;
   },
   end: async function () {
-    stopBackgroundScan();
-    Forte.stopTrack();
-    Ui.cleanup(Pid);
-    Sfx.playSfx("deck_ui_out_of_game_detail.wav");
-    await anime({
-      targets: card.elm,
-      translateY: [0, -50],
-      opacity: [1, 0],
-      duration: 300,
-      easing: "easeInExpo",
-    }).finished;
-    Ui.giveUpUi(Pid);
-    wrapper.cleanup();
-    window.location.reload();
+    if (this.controller) this.controller.destroy();
   },
 };
 

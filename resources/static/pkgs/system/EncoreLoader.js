@@ -137,12 +137,10 @@ const pkg = {
 
     statusP.text("Loading Library...");
     document.addEventListener("CherryTree.FsSvc.SongList.Progress", (e) => {
+      if (this.aborted) return;
       statusP.text(
         `Loading library...\n${e.detail.current}/${e.detail.total} (${e.detail.percentage}%)`,
       );
-    });
-    document.addEventListener("CherryTree.Loading.SetText", (e) => {
-      statusP.text(e.detail);
     });
 
     fsSvc.buildSongList(libraryPath);
@@ -150,6 +148,13 @@ const pkg = {
     document.addEventListener(
       "CherryTree.FsSvc.SongList.Ready",
       async (e) => {
+        if (this.aborted) return;
+
+        if (this.f2Handler) {
+          document.removeEventListener("keydown", this.f2Handler);
+          this.f2Handler = null;
+        }
+
         let msgData = e.detail;
         if (msgData.manifest.additionalContents?.soundFont) {
           statusP.text("Loading sounds...");
@@ -161,7 +166,9 @@ const pkg = {
           url.searchParams.append("path", soundFontPath);
           await forteSvc.loadSoundFont(url.href);
         }
+
         await root.Libs.startPkg("system:EncoreHome", []);
+        root.end();
       },
       { once: true },
     );
@@ -170,14 +177,38 @@ const pkg = {
   async startLoadingSequence() {
     let fsSvc = root.Processes.getService("FsSvc").data;
 
+    if (window.setupRequested) {
+      window.setupRequested = false;
+      statusP.text("Entering System Setup...");
+      setTimeout(() => {
+        this.end();
+        root.Core.pkg.run("system:EncoreSetup", []);
+      }, 500);
+      return;
+    }
+
+    this.f2Handler = (e) => {
+      if (e.key === "F2" && !this.aborted) {
+        this.aborted = true;
+        document.removeEventListener("keydown", this.f2Handler);
+        statusP.text("Entering System Setup...");
+
+        sessionStorage.setItem("encore_boot_setup", "true");
+        setTimeout(() => window.location.reload(), 500);
+      }
+    };
+    document.addEventListener("keydown", this.f2Handler);
+
     try {
       const config = await window.config.getAll();
 
       if (config.libraryPath) {
-        await this.proceedWithLoading(config.libraryPath);
+        if (!this.aborted) await this.proceedWithLoading(config.libraryPath);
       } else {
         statusP.text("Searching for libraries...");
         const foundLibraries = await fsSvc.findEncoreLibraries();
+
+        if (this.aborted) return;
 
         if (foundLibraries.length === 1) {
           statusP.text("Found one library. Configuring automatically...");
@@ -191,14 +222,18 @@ const pkg = {
           statusP.text("Multiple libraries found. Please choose one.");
           const selectedPath =
             await this.promptUserToSelectLibrary(foundLibraries);
+
+          if (this.aborted) return;
+
           await window.config.merge({
             libraryPath: selectedPath,
             setupComplete: true,
           });
           await this.proceedWithLoading(selectedPath);
         } else {
-          // --- CHANGED: Instead of going to setup, wait for a library ---
           const libraryPath = await this.waitForLibrary();
+          if (this.aborted) return;
+
           statusP.text("Library detected! Loading...");
           await window.config.merge({
             libraryPath: libraryPath,
@@ -215,7 +250,6 @@ const pkg = {
 
   start: async function (Root) {
     root = Root;
-    // --- Existing Setup ---
     window.desktopIntegration?.ipc.send("setRPC", {
       details: "Booting up...",
     });
@@ -389,6 +423,7 @@ const pkg = {
     Ui.init(Pid, "horizontal", []);
   },
   end: async function () {
+    if (this.f2Handler) document.removeEventListener("keydown", this.f2Handler);
     Ui.cleanup(Pid);
     await Ui.transition("fadeOut", wrapper, 500);
     Ui.giveUpUi(Pid);

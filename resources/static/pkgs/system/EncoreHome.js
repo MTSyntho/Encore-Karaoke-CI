@@ -1851,7 +1851,6 @@ class EncoreController {
       return;
     }
 
-    // SCORE SCREEN SKIP LOGIC
     if (this.state.isScoreScreenActive) {
       if (["Enter", " ", "Escape"].includes(e.key)) {
         if (this.state.scoreSkipResolver) {
@@ -1860,6 +1859,32 @@ class EncoreController {
         e.preventDefault();
       }
       return;
+    }
+
+    if (e.key === "F2") {
+      e.preventDefault();
+      if (
+        this.state.mode === "player" &&
+        this.state.lastPlaybackStatus === "playing"
+      ) {
+        this.infoBar.showTemp(
+          "ACCESS DENIED",
+          "Please stop playback to enter Setup.",
+          3000,
+        );
+        return;
+      }
+      if (!this.state.isPromptingSetup) {
+        this.state.isPromptingSetup = true;
+        this.dom.standbyScreen.classOff("hidden");
+        this.dom.standbyBumper.classOn("hidden");
+        this.dom.standbyText
+          .classOff("hidden")
+          .text("REBOOT TO SETUP? PRESS ENTER");
+        this.dom.mainContent.classOn("hidden");
+        this.dom.songListContainer.classOn("hidden");
+        return;
+      }
     }
 
     const isInputFocused = document.activeElement === this.dom.searchInput.elm;
@@ -1983,6 +2008,17 @@ class EncoreController {
   }
 
   handleEnter() {
+    if (this.state.isPromptingSetup) {
+      this.state.isPromptingSetup = false;
+      window.desktopIntegration.ipc.send("setRPC", {
+        details: "Rebooting...",
+        state: "",
+      });
+
+      sessionStorage.setItem("encore_boot_setup", "true");
+      window.location.reload();
+      return;
+    }
     const isInputFocused = document.activeElement === this.dom.searchInput.elm;
     const isSearchActive =
       this.state.isSearchOverlayVisible ||
@@ -2113,6 +2149,14 @@ class EncoreController {
 
   handleEscape() {
     if (this.state.isTransitioning) return;
+
+    if (this.state.isPromptingSetup) {
+      this.state.isPromptingSetup = false;
+      this.dom.standbyText.text("SELECT SONG"); // Revert text
+      this.updateMenuUI();
+      return;
+    }
+
     if (this.state.isSearchOverlayVisible) {
       this.toggleSearchOverlay(false);
       return;
