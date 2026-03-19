@@ -254,9 +254,12 @@ class EncoreController {
     await this.bgv.updatePlaylistForCategory();
 
     setTimeout(() => {
-      this.wrapper.classOff("loading");
-      this.Ui.transition("fadeIn", this.wrapper);
-      this.setMode("menu");
+      document.dispatchEvent(new CustomEvent("CherryTree.UI.Ready"));
+      setTimeout(() => {
+        this.wrapper.classOff("loading");
+        this.Ui.transition("fadeIn", this.wrapper);
+        this.setMode("menu");
+      }, 100);
     }, 100);
   }
 

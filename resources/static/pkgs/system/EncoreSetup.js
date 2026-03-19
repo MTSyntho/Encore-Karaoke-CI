@@ -7,7 +7,6 @@ class EncoreSetupController {
     this.Ui = Root.Processes.getService("UiLib").data; // Added UiLib
     this.Forte = Root.Processes.getService("ForteSvc").data;
     this.FsSvc = Root.Processes.getService("FsSvc").data;
-    this.Sfx = Root.Processes.getService("SfxLib").data;
 
     this.config = {};
     this.micDevices = [];
@@ -73,6 +72,9 @@ class EncoreSetupController {
     this.renderView();
 
     setTimeout(() => {
+      window.desktopIntegration.ipc.send("setRPC", {
+        details: `In setup`,
+      });
       this.wrapper.styleJs({ opacity: 1 });
       this.Ui.transition("fadeIn", this.wrapper);
     }, 100);
@@ -343,7 +345,6 @@ class EncoreSetupController {
 
       if (e.key >= "0" && e.key <= "9") {
         if (this.state.authInput.length >= 4) return;
-        this.Sfx.playSfx(`/assets/audio/numbers/${e.key}.wav`);
         this.state.authInput += e.key;
         this.renderView();
 

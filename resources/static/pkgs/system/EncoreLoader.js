@@ -168,7 +168,13 @@ const pkg = {
         }
 
         await root.Libs.startPkg("system:EncoreHome", []);
-        root.end();
+        document.addEventListener(
+          "CherryTree.UI.Ready",
+          () => {
+            root.end();
+          },
+          { once: true },
+        );
       },
       { once: true },
     );
@@ -426,7 +432,6 @@ const pkg = {
     if (this.f2Handler) document.removeEventListener("keydown", this.f2Handler);
     Ui.cleanup(Pid);
     await Ui.transition("fadeOut", wrapper, 500);
-    Ui.giveUpUi(Pid);
     wrapper.cleanup();
   },
 };
