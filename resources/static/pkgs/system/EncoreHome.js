@@ -599,7 +599,7 @@ class EncoreController {
       .styleJs({
         position: "absolute",
         top: "20px",
-        right: "-500px", // Hidden by default
+        left: "-500px", // Hidden by default
         zIndex: "9000",
         transition: "all 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275)",
         backgroundColor: "rgba(20, 20, 30, 0.9)",
@@ -789,19 +789,12 @@ class EncoreController {
     this.state.isCheering = true;
     const cheer = this.state.cheerQueue.shift();
 
-    this.Forte.playSfx("/assets/audio/fanfare-2.mp3"); // Optional: playful sound
-
     this.dom.cheerHeader.html(`🎉 <span>${cheer.nickname}</span> cheers:`);
     this.dom.cheerMessage.text(cheer.message);
+    this.dom.cheerOverlayContainer.styleJs({ left: "20px" });
 
-    // Slide In
-    this.dom.cheerOverlayContainer.styleJs({ right: "20px" });
-
-    // Hold for 5 seconds, then slide out
     setTimeout(() => {
-      this.dom.cheerOverlayContainer.styleJs({ right: "-500px" });
-
-      // Wait for animation to finish, then process next
+      this.dom.cheerOverlayContainer.styleJs({ left: "-500px" });
       setTimeout(() => {
         this.state.isCheering = false;
         this.processCheerQueue();
