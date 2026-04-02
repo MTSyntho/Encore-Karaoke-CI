@@ -5,7 +5,9 @@ const fs = require("fs");
 
 module.exports = {
   packagerConfig: {
-    asar: true,
+    asar: {
+      unpack: "{path/to/*.exe, path/to/**/*.node}"
+    },
     name: "Encore Karaoke",
     icon: "icon.png",
     extraResource: ["resources/static"],
