@@ -5,12 +5,10 @@ const fs = require("fs");
 
 module.exports = {
   packagerConfig: {
-    asar: {
-      unpack: "{path/to/*.exe, path/to/**/*.node}"
-    },
+    asar: true,
     name: "Encore Karaoke",
-    icon: "icon.png",
-    extraResource: ["resources/static"],
+    icon: "resources/icon.ico",
+    extraResource: ["resources/static", "resources/icon.png"],
     linux: {
       target: 'deb',
     },

@@ -20,7 +20,10 @@ const { io: ioClient } = require("socket.io-client"); // Added for Cloud Tunnel
 const qrcode = require("qrcode");
 
 // --- Media & Karaoke Imports ---
-const { setVolume, getVolume, setMute, getMute } = require("easy-volume");
+const { setVolume, getVolume } = require("loudness");
+
+console.log("get volume", getVolume);
+
 const KuromojiAnalyzer = require("kuroshiro-analyzer-kuromoji");
 const Kuroshiro = require("kuroshiro").default;
 const YouTubeCastReceiver = require("yt-cast-receiver");
@@ -324,7 +327,7 @@ const createWindow = () => {
   const win = new BrowserWindow({
     width: 1280,
     height: 752,
-    icon: "icon.png",
+    icon: "resources/icon.png",
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
