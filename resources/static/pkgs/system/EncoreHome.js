@@ -2205,7 +2205,7 @@ class EncoreController {
     await Promise.race([
       (async () => {
         await animate();
-        await new Promise((r) => setTimeout(r, 12000));
+        await new Promise((r) => setTimeout(r, 5000));
       })(),
       new Promise((resolve) => {
         this.state.scoreSkipResolver = resolve;
