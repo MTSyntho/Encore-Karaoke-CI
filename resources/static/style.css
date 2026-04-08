@@ -640,6 +640,16 @@ input[type="range"]::-moz-range-thumb {
   }
 }
 
+@keyframes pulse-status {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
 @keyframes fadeIn {
   from {
     opacity: 0;
@@ -782,6 +792,9 @@ input[type="range"]::-moz-range-thumb {
 }
 .logoAnimateOut {
   animation: logoAnimateOut 1s cubic-bezier(0.165, 0.84, 0.44, 1) forwards;
+}
+.pulse-status {
+  animation: pulse-status 1s ease-in-out infinite;
 }
 
 .lyric-fade-in {

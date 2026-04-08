@@ -461,14 +461,7 @@ const pkg = {
         { targets: statusP.elm, opacity: [0, 1], duration: 1000 },
         "-=500",
       ).complete = () => {
-      anime({
-        targets: statusP.elm,
-        opacity: [1, 0.3],
-        duration: 1000,
-        direction: "alternate",
-        loop: true,
-        easing: "easeInOutSine",
-      });
+      statusP.classOn("pulse-status");
       this.startLoadingSequence();
     };
 
