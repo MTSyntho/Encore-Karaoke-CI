@@ -2298,34 +2298,42 @@ p + .flex-list button {
   color: rgba(255, 255, 255, 0.4);
 }
 
-/* Shared wipe effect logic */
+/* GPU-accelerated highlighting */
 .lyric-syllable-original::after,
-.lyric-syllable-romanized::after {
+.lyric-syllable-romanized::after,
+.lyric-syllable-furigana::after {
   content: attr(data-text);
   position: absolute;
   top: 0;
   left: 0;
-  width: 0;
+  width: 100%;
   color: #ffffff;
   text-shadow: none;
   -webkit-text-stroke: 5px #010141;
   paint-order: stroke fill;
   overflow: hidden;
-  transition: width 0s;
+
+  clip-path: inset(0 100% 0 0);
+  transition: clip-path 0s;
+  will-change: clip-path;
+}
+
+.lyric-syllable-furigana::after {
+  color: #ffb74d;
+  -webkit-text-stroke: 3px #010141;
 }
 
 .lyric-syllable-container.active .lyric-syllable-furigana::after,
 .lyric-syllable-container.active .lyric-syllable-original::after,
 .lyric-syllable-container.active .lyric-syllable-romanized::after {
-  width: 100%;
-  /* Relies on the precise Javascript duration calculation mapped from MIDI Ticks to Seconds */
-  transition: width var(--syllable-duration, 0.2s) linear;
+  clip-path: inset(0 0 0 0);
+  transition: clip-path var(--syllable-duration, 0.2s) linear;
 }
 
 .lyric-syllable-container.completed .lyric-syllable-furigana::after,
 .lyric-syllable-container.completed .lyric-syllable-original::after,
 .lyric-syllable-container.completed .lyric-syllable-romanized::after {
-  width: 100%;
+  clip-path: inset(0 0 0 0);
   transition: none;
 }
 

@@ -1644,6 +1644,8 @@ class EncoreController {
             .attr({ "data-index": s.globalIndex })
             .appendTo(currentWord);
 
+          s.domElement = container;
+
           const furiSpan = new Html("span")
             .classOn("lyric-syllable-furigana")
             .appendTo(container);
@@ -1703,6 +1705,7 @@ class EncoreController {
           }
         }
 
+        // Inside boundLyricEvent (around line ~1100)
         if (matchFound) {
           if (targetSyllable.lineIndex !== currentSongLineIndex) {
             currentSongLineIndex = targetSyllable.lineIndex;
@@ -1716,15 +1719,15 @@ class EncoreController {
               lines[currentSongLineIndex + 2].forEach(getRomanizationPromise);
           }
 
-          const allScreenSyllables = this.wrapper.qsa(
-            ".lyric-syllable-container",
-          );
-          if (allScreenSyllables) {
-            allScreenSyllables.forEach((el) => {
-              const idx = parseInt(el.elm.getAttribute("data-index"), 10);
-              if (idx < targetSyllable.globalIndex)
-                el.classOff("active").classOn("completed");
-            });
+          for (let i = targetSyllable.globalIndex - 1; i >= 0; i--) {
+            let prevSyllable = allSyllables[i];
+            if (
+              !prevSyllable.domElement ||
+              prevSyllable.domElement.elm.classList.contains("completed")
+            ) {
+              break;
+            }
+            prevSyllable.domElement.classOff("active").classOn("completed");
           }
 
           let sweepEndTick =
@@ -1738,13 +1741,13 @@ class EncoreController {
             targetSyllable.absoluteTime;
           durationS = Math.max(0.1, Math.min(durationS, 1.5));
 
-          const newSyllableEl = this.wrapper.qs(
-            `.lyric-syllable-container[data-index="${targetSyllable.globalIndex}"]`,
-          );
-          if (newSyllableEl) {
-            newSyllableEl.style({ "--syllable-duration": `${durationS}s` });
-            newSyllableEl.classOn("active");
+          if (targetSyllable.domElement) {
+            targetSyllable.domElement.style({
+              "--syllable-duration": `${durationS}s`,
+            });
+            targetSyllable.domElement.classOn("active");
           }
+
           currentVisualIndex++;
         }
       };

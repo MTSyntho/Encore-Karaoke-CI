@@ -786,7 +786,7 @@ const pkg = {
 
     try {
       audioContext = new (window.AudioContext || window.webkitAudioContext)({
-        latencyHint: 0.5,
+        latencyHint: 0.1,
         sampleRate: 44100,
       });
 
