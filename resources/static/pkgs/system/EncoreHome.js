@@ -2189,6 +2189,7 @@ class EncoreController {
               x: window.innerWidth / 2,
               y: window.innerHeight / 2,
             },
+            count: 50,
           });
         }
       }
