@@ -2698,7 +2698,28 @@ class EncoreController {
       const cur = this.Forte.getPlaybackState().transpose || 0;
       const next = Math.max(-24, Math.min(24, cur + change));
       this.Forte.setTranspose(next);
-      this.infoBar.showTemp("TRANSPOSE", (next > 0 ? "+" : "") + next, 3000);
+
+      let left = 50;
+      let width = 0;
+      if (next > 0) {
+        width = (next / 24) * 50;
+      } else if (next < 0) {
+        width = (Math.abs(next) / 24) * 50;
+        left = 50 - width;
+      }
+
+      const html = `
+        <div class="transpose-display">
+          <div class="transpose-min">-24</div>
+          <div class="transpose-slider-container">
+            <div class="transpose-slider-center-line"></div>
+            <div class="transpose-slider-fill" style="left: ${left}%; width: ${width}%;"></div>
+          </div>
+          <div class="transpose-max">+24</div>
+          <span class="transpose-value">${(next > 0 ? "+" : "") + next} st</span>
+        </div>
+      `;
+      this.infoBar.showTemp("TRANSPOSE", html, 3000);
     }
   }
 
@@ -2786,15 +2807,31 @@ class EncoreController {
     } else {
       this.bgv.cycleCategory(key === "[" ? -1 : 1);
       const cats = ["Auto", ...this.bgv.categories.map((c) => c.BGV_CATEGORY)];
-      const html = cats
-        .map(
-          (c) =>
-            `<span class="bgv-category-item ${
-              c === this.bgv.selectedCategory ? "selected" : ""
-            }">${c}</span>`,
-        )
-        .join("");
+
+      const html =
+        `<div class="bgv-category-list">` +
+        cats
+          .map(
+            (c) =>
+              `<span class="bgv-category-item ${
+                c === this.bgv.selectedCategory ? "selected" : ""
+              }">${c}</span>`,
+          )
+          .join("") +
+        `</div>`;
+
       this.infoBar.showTemp("BGV", html, 3000);
+
+      setTimeout(() => {
+        const activeCat = document.querySelector(".bgv-category-item.selected");
+        if (activeCat) {
+          activeCat.scrollIntoView({
+            behavior: "auto",
+            block: "nearest",
+            inline: "center",
+          });
+        }
+      }, 50);
     }
   }
 

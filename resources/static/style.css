@@ -2582,9 +2582,19 @@ p + .flex-list button {
   opacity: 0.7;
 }
 
+.bgv-category-list {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  overflow-x: hidden;
+  padding: 0 0.5rem;
+}
+
 .bgv-category-item {
+  flex-shrink: 0;
   padding: 0.25rem 0.75rem;
-  margin: 0 0.1rem;
+  margin: 0;
   border-radius: 0.25rem;
   opacity: 0.6;
   transition: all 0.2s ease;
@@ -2596,6 +2606,62 @@ p + .flex-list button {
   font-weight: bold;
   color: #000;
   background-color: #89cff0;
+}
+
+.transpose-display {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  gap: 1rem;
+}
+
+.transpose-min,
+.transpose-max {
+  font-size: 1.2rem;
+  font-weight: 700;
+  opacity: 0.6;
+  width: 40px;
+  text-align: center;
+}
+
+.transpose-slider-container {
+  flex-grow: 1;
+  height: 12px;
+  background-color: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 6px;
+  position: relative;
+}
+
+.transpose-slider-center-line {
+  position: absolute;
+  left: 50%;
+  top: -4px;
+  bottom: -4px;
+  width: 2px;
+  background-color: rgba(255, 255, 255, 0.6);
+  transform: translateX(-50%);
+  border-radius: 2px;
+  z-index: 2;
+}
+
+.transpose-slider-fill {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  background-color: #f7b733;
+  border-radius: 6px;
+  transition:
+    width 0.15s cubic-bezier(0.175, 0.885, 0.32, 1.275),
+    left 0.15s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.transpose-value {
+  font-size: 1.8rem;
+  font-weight: 700;
+  width: 60px;
+  text-align: right;
+  color: #f7b733;
 }
 
 .info-bar-content .volume-display {
