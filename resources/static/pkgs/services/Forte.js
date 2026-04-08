@@ -152,6 +152,16 @@ function logVerboseWarn(message, ...args) {
   console.warn(`[FORTE SVC] ${message}`, ...args);
 }
 
+/**
+ * Updates the effective SFX gain based on main volume and SFX-specific volume.
+ * The effective gain is the product of both volumes, allowing SFX to react relatively to main volume.
+ */
+function updateSfxGain() {
+  if (!sfxGain || !audioContext) return;
+  const effectiveGain = state.playback.volume * state.playback.sfxVolume;
+  sfxGain.gain.setValueAtTime(effectiveGain, audioContext.currentTime);
+}
+
 let root;
 let audioContext;
 let masterGain;
@@ -163,6 +173,7 @@ let sfxResolve = null;
 let animationFrameId = null;
 let sfxGain;
 const sfxCache = new Map();
+let sfxMidiOriginalVolume = null; // Stores the main track volume during a MIDI SFX playback
 
 let pianoRollContainer = null;
 let pianoRollTrack = null;
@@ -237,6 +248,7 @@ const state = {
     leftPannerGain: null,
     rightPannerGain: null,
     volume: 1,
+    sfxVolume: 1,
     smoothedTime: 0,
     lastFrameTime: 0,
   },
@@ -888,9 +900,10 @@ const pkg = {
      * Resolves when the effect has fully completed playing.
      *
      * @param {string} url - Target URL matching the cache dictionary.
+     * @param {number} [volume=1] - Optional volume multiplier from 0.0 to 1.0 for this specific play.
      * @returns {Promise<boolean>} Resolves to true when completed naturally, false if interrupted.
      */
-    playSfx: async (url) => {
+    playSfx: async (url, volume = 1) => {
       await pkg.data.stopSfx();
 
       return new Promise(async (resolve) => {
@@ -904,17 +917,40 @@ const pkg = {
           cached = sfxCache.get(url);
         }
 
+        const clampedVolume = Math.max(0, Math.min(1, volume));
+
         if (cached) {
           sfxResolve = resolve;
 
           if (cached.isMidi) {
-            if (!state.playback.synthesizer) return resolve(false);
+            if (!state.playback.synthesizer || !state.playback.midiGain)
+              return resolve(false);
+
+            // Very hacky ass way of doing MIDI sfx volume
+            // Could have added another Synthesizer but holy sh*t the RAM usage spikes like CRAZY
+            sfxMidiOriginalVolume = state.playback.midiGain.gain.value;
+            const sfxTargetVolume =
+              state.playback.volume * state.playback.sfxVolume * clampedVolume;
+            state.playback.midiGain.gain.setTargetAtTime(
+              sfxTargetVolume,
+              audioContext.currentTime,
+              0.01,
+            );
+
             sfxSequencer = new Sequencer(
               [{ binary: cached.buffer }],
               state.playback.synthesizer,
             );
             sfxSequencer.loop = false;
             sfxSequencer.addOnSongEndedEvent(() => {
+              if (sfxMidiOriginalVolume !== null) {
+                state.playback.midiGain.gain.setTargetAtTime(
+                  sfxMidiOriginalVolume,
+                  audioContext.currentTime,
+                  0.01,
+                );
+                sfxMidiOriginalVolume = null;
+              }
               if (sfxResolve) {
                 sfxResolve(true);
                 sfxResolve = null;
@@ -923,7 +959,12 @@ const pkg = {
           } else {
             sfxSourceNode = audioContext.createBufferSource();
             sfxSourceNode.buffer = cached.buffer;
-            sfxSourceNode.connect(sfxGain);
+
+            const sfxIndividualGain = audioContext.createGain();
+            sfxIndividualGain.gain.value = clampedVolume;
+            sfxSourceNode.connect(sfxIndividualGain);
+            sfxIndividualGain.connect(sfxGain);
+
             sfxSourceNode.onended = () => {
               if (sfxResolve) {
                 sfxResolve(true);
@@ -950,6 +991,16 @@ const pkg = {
       if (sfxSequencer) {
         sfxSequencer.stop();
         sfxSequencer = null;
+
+        // Restore volume immediately on interruption
+        if (sfxMidiOriginalVolume !== null && state.playback.midiGain) {
+          state.playback.midiGain.gain.setTargetAtTime(
+            sfxMidiOriginalVolume,
+            audioContext.currentTime,
+            0.01,
+          );
+          sfxMidiOriginalVolume = null;
+        }
       }
       if (sfxResolve) {
         sfxResolve(false);
@@ -1468,9 +1519,22 @@ const pkg = {
       if (!masterGain) return;
       const clampedLevel = Math.max(0, Math.min(1, level));
       masterGain.gain.setValueAtTime(clampedLevel, audioContext.currentTime);
-      sfxGain.gain.setValueAtTime(clampedLevel, audioContext.currentTime);
       state.playback.volume = clampedLevel;
+      updateSfxGain();
       logVerbose("Track volume set", clampedLevel);
+    },
+
+    /**
+     * Sets the sound effects volume independently from main track volume.
+     * The actual SFX output is the product of main volume and SFX volume.
+     *
+     * @param {number} level - SFX volume factor from 0.0 to 1.0.
+     */
+    setSfxVolume: (level) => {
+      const clampedLevel = Math.max(0, Math.min(1, level));
+      state.playback.sfxVolume = clampedLevel;
+      updateSfxGain();
+      logVerbose("SFX volume set", clampedLevel);
     },
 
     /**

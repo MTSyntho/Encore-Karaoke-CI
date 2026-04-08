@@ -2141,6 +2141,7 @@ class EncoreController {
 
       const fanfareFinished = await this.Forte.playSfx(
         "/assets/audio/fanfare.mid",
+        0.5,
       );
       if (!fanfareFinished || this.state.scoreSkipped) return;
 
