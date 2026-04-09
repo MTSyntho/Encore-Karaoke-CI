@@ -283,6 +283,14 @@ const pkg = {
             });
             if (tags.tags.title) title = tags.tags.title;
             if (tags.tags.artist) artist = tags.tags.artist;
+
+            if (!tags.tags.title && !tags.tags.artist) {
+              let parts = title.split(" - ");
+              if (parts.length >= 2) {
+                artist = parts[0].trim();
+                title = parts.slice(1).join(" - ").trim();
+              }
+            }
           } catch (error) {
             console.warn(
               `[FsSvc] Tag read failed for ${filename}, using filename.`,
