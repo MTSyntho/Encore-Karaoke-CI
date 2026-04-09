@@ -1243,6 +1243,7 @@ class EncoreController {
     this.state.isTransitioning = true;
     this.recorder.setSongInfo(song);
     this.cleanupPlayerEvents();
+    this.lastCompletedSyllableIndex = -1;
 
     this.dom.countdownDisplay.classOff("visible").text("");
     this.countdownTargetTime = null;
@@ -1615,6 +1616,7 @@ class EncoreController {
         allSyllables[allSyllables.length - 1].durationTicks = ppqm;
 
       this.allMidiSyllables = allSyllables;
+      this.lastCompletedSyllableIndex = -1;
       const displayLines = [
         this.dom.midiLineDisplay1,
         this.dom.midiLineDisplay2,
@@ -1721,7 +1723,6 @@ class EncoreController {
           }
         }
 
-        // Inside boundLyricEvent (around line ~1100)
         if (matchFound) {
           if (targetSyllable.lineIndex !== currentSongLineIndex) {
             currentSongLineIndex = targetSyllable.lineIndex;
@@ -1735,16 +1736,18 @@ class EncoreController {
               lines[currentSongLineIndex + 2].forEach(getRomanizationPromise);
           }
 
-          for (let i = targetSyllable.globalIndex - 1; i >= 0; i--) {
-            let prevSyllable = allSyllables[i];
-            if (
-              !prevSyllable.domElement ||
-              prevSyllable.domElement.elm.classList.contains("completed")
-            ) {
-              break;
+          for (
+            let i = this.lastCompletedSyllableIndex + 1;
+            i < targetSyllable.globalIndex;
+            i++
+          ) {
+            const prevSyllable = allSyllables[i];
+            if (prevSyllable && prevSyllable.domElement) {
+              prevSyllable.domElement.classOff("active").classOn("completed");
             }
-            prevSyllable.domElement.classOff("active").classOn("completed");
           }
+
+          this.lastCompletedSyllableIndex = targetSyllable.globalIndex - 1;
 
           let sweepEndTick =
             targetSyllable.tick +

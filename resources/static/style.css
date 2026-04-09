@@ -2200,6 +2200,9 @@ p + .flex-list button {
     opacity 0.3s ease;
   color: rgba(255, 255, 255, 0.4);
   -webkit-text-stroke: 0;
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  perspective: 1000;
 }
 
 .lyric-line.past {
