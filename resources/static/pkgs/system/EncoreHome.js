@@ -158,6 +158,10 @@ class EncoreController {
       "fanfare-2.mid",
       "fanfare-3.mid",
       "fanfare-4.mid",
+      "scores/0.wav",
+      "scores/20.wav",
+      "scores/50.wav",
+      "scores/70.wav",
       ...Array.from({ length: 10 }, (_, i) => `numbers/${i}.wav`),
     ];
     await Promise.all(sfx.map((s) => this.Forte.loadSfx(`/assets/audio/${s}`)));
@@ -2195,7 +2199,17 @@ class EncoreController {
       }
 
       if (!playedNarration) {
-        await new Promise((r) => setTimeout(r, 4000));
+        let defaultNarrationUrl = "/assets/audio/scores/0.wav";
+
+        if (s >= 70) {
+          defaultNarrationUrl = "/assets/audio/scores/70.wav";
+        } else if (s >= 50) {
+          defaultNarrationUrl = "/assets/audio/scores/50.wav";
+        } else if (s >= 20) {
+          defaultNarrationUrl = "/assets/audio/scores/20.wav";
+        }
+
+        await this.Forte.playSfx(defaultNarrationUrl);
       }
     };
 
