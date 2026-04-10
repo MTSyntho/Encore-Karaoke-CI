@@ -173,7 +173,7 @@ let sfxResolve = null;
 let animationFrameId = null;
 let sfxGain;
 const sfxCache = new Map();
-let sfxMidiOriginalVolume = null; // Stores the main track volume during a MIDI SFX playback
+let sfxMidiOriginalVolume = null;
 
 let pianoRollContainer = null;
 let pianoRollTrack = null;
@@ -185,12 +185,14 @@ let scoreReasonTimeout = null;
 const PIXELS_PER_SECOND = 150;
 
 const GUIDE_CLARITY_THRESHOLD = 0.5;
-const MIC_CLARITY_THRESHOLD = 0.7;
-const RMS_NOISE_GATE = 0.005;
+const MIC_CLARITY_THRESHOLD = 0.85;
+const RMS_NOISE_GATE = 0.015;
 
-const KEY_AWARE_RMS_GATE = 0.005;
-const KEY_AWARE_CLARITY = 0.85;
+const KEY_AWARE_RMS_GATE = 0.015;
+const KEY_AWARE_CLARITY = 0.92;
 const MIN_FRAMES_FOR_FULL_SCORE = 900;
+const MIN_VOCAL_HZ = 75;
+const MAX_VOCAL_HZ = 1200;
 
 let guideAnalyserBuffer = null;
 let micAnalyserBuffer = null;
@@ -201,6 +203,8 @@ const state = {
     userInputEnabled: true,
     micStream: null,
     micSourceNode: null,
+    micHighpassNode: null,
+    micLowpassNode: null,
     micAnalyser: null,
     vocalGuideAnalyser: null,
     pitchDetector: null,
@@ -223,9 +227,9 @@ const state = {
     rollingChroma: new Array(12).fill(0),
     currentKeyName: null,
     allowedPitchClasses: [],
-    candidateKeyName: null,
-    candidateKeyCount: 0,
+    keyHistory: [],
     frameCount: 0,
+    activeMidiNotes: new Set(),
   },
   playback: {
     status: "stopped",
@@ -320,12 +324,14 @@ function updateScore(currentTime) {
   }
   const rms = Math.sqrt(sumSquares / micAnalyserBuffer.length);
 
+  const isValidPitch = micPitch >= MIN_VOCAL_HZ && micPitch <= MAX_VOCAL_HZ;
+
   const isSinging =
-    micClarity > MIC_CLARITY_THRESHOLD && micPitch > 50 && rms > RMS_NOISE_GATE;
+    micClarity > MIC_CLARITY_THRESHOLD && isValidPitch && rms > RMS_NOISE_GATE;
   let midiMicPitch = isSinging ? 12 * Math.log2(micPitch / 440) + 69 : 0;
 
   const isKeyAwareSinging =
-    micClarity > KEY_AWARE_CLARITY && micPitch > 50 && rms > KEY_AWARE_RMS_GATE;
+    micClarity > KEY_AWARE_CLARITY && isValidPitch && rms > KEY_AWARE_RMS_GATE;
   let keyAwareMidiPitch = isKeyAwareSinging
     ? 12 * Math.log2(micPitch / 440) + 69
     : 0;
@@ -361,7 +367,7 @@ function updateScore(currentTime) {
       while (normalizedMicPitch > guidePitch * 1.5) normalizedMicPitch /= 2;
 
       const centsDifference = 1200 * Math.log2(normalizedMicPitch / guidePitch);
-      if (Math.abs(centsDifference) < 100) isCorrectPitch = true;
+      if (Math.abs(centsDifference) < 70) isCorrectPitch = true;
     }
 
     if (isCorrectPitch && !state.scoring.hasHitCurrentNote) {
@@ -405,89 +411,112 @@ function updateScore(currentTime) {
     }
     state.scoring.finalScore = state.scoring.details.accuracy;
   } else {
-    if (state.scoring.meydaAnalyzer && typeof Meyda !== "undefined") {
-      state.scoring.frameCount++;
+    state.scoring.frameCount++;
 
-      if (state.scoring.frameCount % 3 === 0) {
+    if (state.scoring.frameCount % 3 === 0) {
+      if (state.playback.isMidi) {
+        for (let i = 0; i < 12; i++) {
+          state.scoring.rollingChroma[i] *= 0.85;
+        }
+        for (const note of state.scoring.activeMidiNotes) {
+          state.scoring.rollingChroma[note % 12] += 0.15;
+        }
+      } else if (state.scoring.meydaAnalyzer && typeof Meyda !== "undefined") {
         const features = state.scoring.meydaAnalyzer.get("chroma");
         if (features) {
           for (let i = 0; i < 12; i++) {
             state.scoring.rollingChroma[i] =
-              state.scoring.rollingChroma[i] * 0.95 + features[i] * 0.05;
-          }
-
-          if (state.scoring.frameCount % 60 === 0) {
-            const detected = detectMusicalKey(state.scoring.rollingChroma);
-
-            if (detected.correlation > 0.4) {
-              if (!state.scoring.currentKeyName) {
-                state.scoring.currentKeyName = detected.name;
-                const root = detected.root;
-                const intervals =
-                  detected.mode === "Major"
-                    ? [0, 2, 4, 5, 7, 9, 11]
-                    : [0, 2, 3, 5, 7, 8, 10];
-                state.scoring.allowedPitchClasses = intervals.map(
-                  (interval) => (root + interval) % 12,
-                );
-                console.log(
-                  `[FORTE SVC] 🎵 Initial Key Detected: ${detected.name} (Correlation: ${detected.correlation.toFixed(2)})`,
-                );
-              } else if (detected.name !== state.scoring.currentKeyName) {
-                if (detected.name === state.scoring.candidateKeyName) {
-                  state.scoring.candidateKeyCount++;
-                  if (state.scoring.candidateKeyCount >= 5) {
-                    state.scoring.currentKeyName = detected.name;
-                    const root = detected.root;
-                    const intervals =
-                      detected.mode === "Major"
-                        ? [0, 2, 4, 5, 7, 9, 11]
-                        : [0, 2, 3, 5, 7, 8, 10];
-                    state.scoring.allowedPitchClasses = intervals.map(
-                      (interval) => (root + interval) % 12,
-                    );
-                    state.scoring.candidateKeyCount = 0;
-                    console.log(
-                      `[FORTE SVC] 🎵 Key Modulation Confirmed: ${detected.name} (Correlation: ${detected.correlation.toFixed(2)})`,
-                    );
-                  }
-                } else {
-                  state.scoring.candidateKeyName = detected.name;
-                  state.scoring.candidateKeyCount = 1;
-                }
-              } else {
-                state.scoring.candidateKeyName = null;
-                state.scoring.candidateKeyCount = 0;
-              }
-            }
+              state.scoring.rollingChroma[i] * 0.85 + features[i] * 0.15;
           }
         }
       }
 
-      if (isKeyAwareSinging && state.scoring.allowedPitchClasses.length > 0) {
-        state.scoring.totalFramesSinging++;
-        const pitchClass = Math.round(keyAwareMidiPitch) % 12;
+      if (state.scoring.frameCount % 30 === 0) {
+        const detected = detectMusicalKey(state.scoring.rollingChroma);
 
-        if (state.scoring.allowedPitchClasses.includes(pitchClass)) {
-          state.scoring.framesInKey++;
+        if (detected.correlation > 0.3) {
+          state.scoring.keyHistory.push(detected);
+        } else {
+          state.scoring.keyHistory.push({ name: "Unknown" });
+        }
+
+        if (state.scoring.keyHistory.length > 6) {
+          state.scoring.keyHistory.shift();
+        }
+
+        const votes = {};
+        let maxVotes = 0;
+        let votedKey = null;
+        let votedRoot = 0;
+        let votedMode = "";
+
+        for (const k of state.scoring.keyHistory) {
+          if (k.name === "Unknown") continue;
+          votes[k.name] = (votes[k.name] || 0) + 1;
+          if (votes[k.name] > maxVotes) {
+            maxVotes = votes[k.name];
+            votedKey = k.name;
+            votedRoot = k.root;
+            votedMode = k.mode;
+          }
+        }
+
+        if (votedKey) {
+          if (!state.scoring.currentKeyName && maxVotes >= 2) {
+            state.scoring.currentKeyName = votedKey;
+            const intervals =
+              votedMode === "Major"
+                ? [0, 2, 4, 5, 7, 9, 11]
+                : [0, 2, 3, 5, 7, 8, 10];
+            state.scoring.allowedPitchClasses = intervals.map(
+              (interval) => (votedRoot + interval) % 12,
+            );
+            console.log(
+              `[FORTE SVC] 🎵 Initial Key Locked: ${votedKey} (${maxVotes}/6 votes)`,
+            );
+          } else if (
+            state.scoring.currentKeyName !== votedKey &&
+            maxVotes >= 4
+          ) {
+            state.scoring.currentKeyName = votedKey;
+            const intervals =
+              votedMode === "Major"
+                ? [0, 2, 4, 5, 7, 9, 11]
+                : [0, 2, 3, 5, 7, 8, 10];
+            state.scoring.allowedPitchClasses = intervals.map(
+              (interval) => (votedRoot + interval) % 12,
+            );
+            console.log(
+              `[FORTE SVC] 🎵 Key Modulation Confirmed: ${votedKey} (${maxVotes}/6 votes)`,
+            );
+          }
         }
       }
-
-      if (state.scoring.totalFramesSinging > 0) {
-        const rawAccuracy =
-          (state.scoring.framesInKey / state.scoring.totalFramesSinging) * 100;
-        const participationMultiplier = Math.min(
-          1.0,
-          state.scoring.totalFramesSinging / MIN_FRAMES_FOR_FULL_SCORE,
-        );
-
-        state.scoring.details.accuracy = rawAccuracy * participationMultiplier;
-      } else {
-        state.scoring.details.accuracy = 0;
-      }
-
-      state.scoring.finalScore = state.scoring.details.accuracy;
     }
+
+    if (isKeyAwareSinging && state.scoring.allowedPitchClasses.length > 0) {
+      state.scoring.totalFramesSinging++;
+      const pitchClass = Math.round(keyAwareMidiPitch) % 12;
+
+      if (state.scoring.allowedPitchClasses.includes(pitchClass)) {
+        state.scoring.framesInKey++;
+      }
+    }
+
+    if (state.scoring.totalFramesSinging > 0) {
+      const rawAccuracy =
+        (state.scoring.framesInKey / state.scoring.totalFramesSinging) * 100;
+      const participationMultiplier = Math.min(
+        1.0,
+        state.scoring.totalFramesSinging / MIN_FRAMES_FOR_FULL_SCORE,
+      );
+
+      state.scoring.details.accuracy = rawAccuracy * participationMultiplier;
+    } else {
+      state.scoring.details.accuracy = 0;
+    }
+
+    state.scoring.finalScore = state.scoring.details.accuracy;
   }
 
   if (
@@ -663,7 +692,8 @@ function startIncrementalGuideAnalysis(audioBuffer) {
 
       const isNoteActive =
         clarity > GUIDE_CLARITY_THRESHOLD &&
-        pitch > 50 &&
+        pitch >= MIN_VOCAL_HZ &&
+        pitch <= MAX_VOCAL_HZ &&
         midiPitch >= 0 &&
         midiPitch < 128;
 
@@ -964,8 +994,6 @@ const pkg = {
             if (!state.playback.synthesizer || !state.playback.midiGain)
               return resolve(false);
 
-            // Very hacky ass way of doing MIDI sfx volume
-            // Could have added another Synthesizer but holy sh*t the RAM usage spikes like CRAZY
             sfxMidiOriginalVolume = state.playback.midiGain.gain.value;
             const sfxTargetVolume =
               state.playback.volume * state.playback.sfxVolume * clampedVolume;
@@ -1030,7 +1058,6 @@ const pkg = {
         sfxSequencer.stop();
         sfxSequencer = null;
 
-        // Restore volume immediately on interruption
         if (sfxMidiOriginalVolume !== null && state.playback.midiGain) {
           state.playback.midiGain.gain.setTargetAtTime(
             sfxMidiOriginalVolume,
@@ -1167,6 +1194,7 @@ const pkg = {
       state.playback.multiplexPan = -1;
       state.playback.guideNotes = [];
       state.playback.isAnalyzing = false;
+      state.scoring.activeMidiNotes.clear();
 
       if (pianoRollContainer) pianoRollContainer.classOff("visible");
       if (pianoRollTrack) pianoRollTrack.clear();
@@ -1218,6 +1246,42 @@ const pkg = {
           }, "forte-tempo-change");
 
           logVerbose("Sequencer loaded", state.playback.sequencer);
+          logVerbose("Synthesizer", state.playback.synthesizer);
+
+          for (const channel of state.playback.synthesizer.channelProperties) {
+            console.log("Midi channel", channel);
+          }
+
+          state.playback.synthesizer.eventHandler.events.noteon = {
+            NoteEventHandler: (e) => {
+              if (
+                state.playback.synthesizer.channelProperties[e.channel]
+                  .isDrum == false
+              ) {
+                if (e.velocity > 0) {
+                  state.scoring.activeMidiNotes.add(e.midiNote);
+                } else {
+                  state.scoring.activeMidiNotes.delete(e.midiNote);
+                }
+              }
+            },
+          };
+
+          state.playback.synthesizer.eventHandler.events.noteoff = {
+            NoteEventHandler: (e) => {
+              if (
+                state.playback.synthesizer.channelProperties[e.channel]
+                  .isDrum == false
+              ) {
+                state.scoring.activeMidiNotes.delete(e.midiNote);
+              }
+            },
+          };
+
+          logVerbose(
+            "Synthesizer event handlers",
+            state.playback.synthesizer.eventHandler,
+          );
 
           await new Promise((resolve) => {
             state.playback.sequencer.addOnSongChangeEvent(() => {
@@ -1344,9 +1408,9 @@ const pkg = {
         rollingChroma: new Array(12).fill(0),
         currentKeyName: null,
         allowedPitchClasses: [],
-        candidateKeyName: null,
-        candidateKeyCount: 0,
+        keyHistory: [],
         frameCount: 0,
+        activeMidiNotes: new Set(),
         details: { accuracy: 0 },
       });
 
@@ -1429,8 +1493,9 @@ const pkg = {
       }
 
       if (
-        state.playback.isMidi ||
-        (!state.playback.isMultiplexed && state.playback.buffer)
+        !state.playback.isMidi &&
+        !state.playback.isMultiplexed &&
+        state.playback.buffer
       ) {
         if (typeof Meyda !== "undefined") {
           if (!state.scoring.meydaAnalyzer) {
@@ -1876,9 +1941,21 @@ const pkg = {
         } catch (e) {}
         state.scoring.micSourceNode = null;
       }
+      if (state.scoring.micHighpassNode) {
+        try {
+          state.scoring.micHighpassNode.disconnect();
+        } catch (e) {}
+        state.scoring.micHighpassNode = null;
+      }
+      if (state.scoring.micLowpassNode) {
+        try {
+          state.scoring.micLowpassNode.disconnect();
+        } catch (e) {}
+        state.scoring.micLowpassNode = null;
+      }
       if (state.scoring.micAnalyser) {
         try {
-          state.effects.micChainInput.disconnect(state.scoring.micAnalyser);
+          state.scoring.micLowpassNode.disconnect(state.scoring.micAnalyser);
         } catch (e) {}
         state.scoring.micAnalyser = null;
       }
@@ -1908,13 +1985,29 @@ const pkg = {
 
         state.scoring.micStream = stream;
         const source = audioContext.createMediaStreamSource(stream);
+
+        // For recording
+        source.connect(state.effects.micChainInput);
+
+        // Score processing
+        const hpFilter = audioContext.createBiquadFilter();
+        hpFilter.type = "highpass";
+        hpFilter.frequency.value = 85;
+
+        const lpFilter = audioContext.createBiquadFilter();
+        lpFilter.type = "lowpass";
+        lpFilter.frequency.value = 2000;
+
         const analyser = audioContext.createAnalyser();
         analyser.fftSize = 2048;
 
-        source.connect(state.effects.micChainInput);
-        state.effects.micChainInput.connect(analyser);
+        source.connect(hpFilter);
+        hpFilter.connect(lpFilter);
+        lpFilter.connect(analyser);
 
         state.scoring.micSourceNode = source;
+        state.scoring.micHighpassNode = hpFilter;
+        state.scoring.micLowpassNode = lpFilter;
         state.scoring.micAnalyser = analyser;
 
         if (!state.scoring.pitchDetector) {
@@ -1923,7 +2016,9 @@ const pkg = {
           );
         }
         state.scoring.enabled = true;
-        logVerbose("Microphone input started", { deviceId: deviceId });
+        logVerbose("Microphone input started with isolated scoring filters", {
+          deviceId: deviceId,
+        });
       } catch (e) {
         console.error("[FORTE SVC] Failed to get microphone input:", e);
       }
@@ -1973,9 +2068,6 @@ const pkg = {
       });
       const { micChainInput, micChainOutput, vocalChain } = state.effects;
       micChainInput.disconnect();
-      if (state.scoring.micAnalyser) {
-        micChainInput.connect(state.scoring.micAnalyser);
-      }
 
       let lastNode = micChainInput;
       if (vocalChain.length > 0) {
