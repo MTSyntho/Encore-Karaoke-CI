@@ -56,7 +56,10 @@ const pkg = {
     tiles.elm.style.setProperty("--rows", rows);
     createTiles(columns * rows);
 
-    const terebiText = "テレビ";
+    let terebiText = "テレビ";
+    if (Math.floor(Math.random() * 100) == 7) {
+      terebiText = "テレサ";
+    }
     const terebiH1 = new Html("h1")
       .styleJs({
         fontFamily: "Rajdhani, sans-serif",
