@@ -1,9 +1,5 @@
-// --- START OF FILE main.js ---
-
-// This check is for Windows installers. It should be the very first thing.
 if (require("electron-squirrel-startup")) app.quit();
 
-// --- Core Imports ---
 const { app, BrowserWindow, ipcMain } = require("electron");
 const path = require("path");
 const fs = require("fs");
@@ -11,35 +7,27 @@ const crypto = require("crypto");
 const dgram = require("dgram");
 const { exec } = require("child_process");
 
-// --- Server & Networking ---
 const express = require("express");
 const http = require("http");
 const cors = require("cors");
 const { Server } = require("socket.io");
-const { io: ioClient } = require("socket.io-client"); // Added for Cloud Tunnel
+const { io: ioClient } = require("socket.io-client");
 const qrcode = require("qrcode");
 
-// --- Media & Karaoke Imports ---
 const { setVolume, getVolume } = require("loudness");
 
 console.log("get volume", getVolume);
 
 const KuromojiAnalyzer = require("kuroshiro-analyzer-kuromoji");
 const Kuroshiro = require("kuroshiro").default;
-const YouTubeCastReceiver = require("yt-cast-receiver");
-const { Player } = require("yt-cast-receiver");
 const youtubesearchapi = require("youtube-search-api");
 const si = require("systeminformation");
 const mime = require("mime-types");
 
-// --- Integration Imports ---
 const { Client } = require("@xhayper/discord-rpc");
 const Config = require("./config-manager");
-const { version } = require("os");
 
-// ==========================================
-// 1. LOGGING SYSTEM
-// ==========================================
+// Logging System
 const logger = {
   info: (tag, msg) =>
     console.log(`[${new Date().toLocaleTimeString()}] [INFO] [${tag}] ${msg}`),
@@ -53,9 +41,7 @@ const logger = {
     console.log(`[${new Date().toLocaleTimeString()}] [DBUG] [${tag}] ${msg}`),
 };
 
-// ==========================================
-// 2. INITIALIZATION
-// ==========================================
+// Initialization
 const versionInformation = {
   number: "1.0.1",
   channel: "BETA",
@@ -67,13 +53,11 @@ const kioskEnabled = process.argv.includes("--kiosk");
 const PORT = 9864;
 const server = express();
 const serverHttp = http.createServer(server);
-const io = new Server(serverHttp); // Local Network Server
+const io = new Server(serverHttp);
 
-// Initialize Kuroshiro
 const kuroshiro = new Kuroshiro();
 kuroshiro.init(new KuromojiAnalyzer());
 
-// Load Config
 const userData = app.getPath("userData");
 logger.info("SYSTEM", `User Data Path: ${userData}`);
 try {
@@ -83,73 +67,7 @@ try {
   logger.error("CONFIG", e.message);
 }
 
-// ==========================================
-// 3. UTILITY CLASSES
-// ==========================================
-class SocketPlayer extends Player {
-  constructor(socket) {
-    super();
-    this.socket = socket;
-    this.volume = { level: 100, muted: false };
-    this.position = 0;
-    this.duration = 0;
-  }
-  _emit(event, data) {
-    logger.debug("PLAYER", `Action: ${event}`);
-    this.socket.emit(event, data);
-    return Promise.resolve(true);
-  }
-  doPause() {
-    return this._emit("pause");
-  }
-  doResume() {
-    return this._emit("resume");
-  }
-  doStop() {
-    this.position = 0;
-    return this._emit("stop");
-  }
-  doPlay(video, position) {
-    this.position = 0;
-    logger.info("PLAYER", `Playing: ${video}`);
-    this.socket.emit("play", video);
-    return Promise.resolve(true);
-  }
-  doSeek(position) {
-    this.position = position;
-    return this._emit("seek", position);
-  }
-  doSetVolume(volume) {
-    this.volume = volume;
-    return this._emit("volume", volume);
-  }
-  doGetVolume() {
-    return Promise.resolve(this.volume);
-  }
-  doGetPosition() {
-    return Promise.resolve(this.position);
-  }
-  doGetDuration() {
-    return Promise.resolve(this.duration);
-  }
-  setDuration(duration) {
-    this.duration = duration;
-  }
-  setPosition(position) {
-    this.position = position;
-  }
-  setVolume(volume) {
-    this.volume = volume;
-    this._emit("volume", volume);
-  }
-  resetPosition() {
-    this.position = 0;
-  }
-}
-
-// ==========================================
-// 4. DISCORD RPC HANDLING
-// ==========================================
+// Discord RPC Handling
 let discordClient = new Client({ clientId: "1408795513397973052" });
 let rpcReconnAttempts = 0;
 let isRpcReconnecting = false;
@@ -187,15 +105,12 @@ function setupDiscordRPC() {
   });
 }
 
-// ==========================================
-// 5. SERVER ROUTES & LOGIC
-// ==========================================
+// Server Routes & Logic
 server.use(express.static("resources/static"));
 server.use(express.static("public"));
 server.use(express.json());
 server.use(cors());
 
-// --- Local IP detection for fallback ---
 let local_ip = null;
 const udpSocket = dgram.createSocket("udp4");
 udpSocket.connect(80, "8.8.8.8", () => {
@@ -206,7 +121,6 @@ udpSocket.connect(80, "8.8.8.8", () => {
 
 server.get("/local_ip", (req, res) => res.send(local_ip));
 
-// --- QR Code generation ---
 server.get("/qr", (req, res) => {
   qrcode.toDataURL(req.query["url"], (err, url) => {
     if (err) return res.status(500).send("QR Error");
@@ -216,7 +130,6 @@ server.get("/qr", (req, res) => {
   });
 });
 
-// --- File System Routes ---
 server.get("/drives", async (req, res) => {
   logger.debug("FILE", "Requesting drives");
   try {
@@ -286,7 +199,6 @@ server.get("/getFile", (req, res) => {
   });
 });
 
-// --- Feature Routes ---
 server.get("/yt-search", async (req, res) => {
   const q = req.query.q;
   logger.info("YOUTUBE", `Searching: ${q}`);
@@ -320,9 +232,7 @@ server.post("/auth/verify-hash", (req, res) => {
   res.json({ valid: computedHash === hash });
 });
 
-// ==========================================
-// 6. MAIN APP STARTUP
-// ==========================================
+// Main App Startup
 const createWindow = () => {
   const win = new BrowserWindow({
     width: 1280,
@@ -368,7 +278,6 @@ app.whenReady().then(() => {
     .login()
     .catch((e) => logger.error("DISCORD", "Initial login failed"));
 
-  // -- Encore Link Tunnel --
   const CLOUD_URL = "https://olive.nxw.pw:8443";
   const cloudSocket = ioClient(CLOUD_URL, {
     query: { clientType: "host" },
@@ -406,20 +315,6 @@ app.whenReady().then(() => {
     });
   });
 
-  // --- MIC / PEERJS Logic ---
-  const playerPeerId = `encore-player-${crypto.randomBytes(8).toString("hex")}`;
-  const micSessions = new Map();
-  server.get("/mic/initiate", (req, res) => {
-    const sessionCode = crypto.randomUUID();
-    micSessions.set(sessionCode, { status: "pending", createdAt: Date.now() });
-    setTimeout(() => {
-      if (micSessions.has(sessionCode)) micSessions.delete(sessionCode);
-    }, 300000);
-    logger.info("MIC", `Session created: ${sessionCode}`);
-    res.json({ playerPeerId, sessionCode });
-  });
-
-  // --- Electron IPC Handlers ---
   ipcMain.handle("get-version", () => versionInformation);
   ipcMain.handle("get-kiosk-enabled", () => kioskEnabled);
   ipcMain.handle("config-get-all", () => Config.getAll());
@@ -437,15 +332,6 @@ app.whenReady().then(() => {
     Config.merge(dataObject);
     logger.info("CONFIG", "Configuration merged with new data.");
   });
-  ipcMain.handle("mic-validate-code", (event, code) => {
-    if (micSessions.has(code) && micSessions.get(code).status === "pending") {
-      micSessions.set(code, { status: "active" });
-      logger.info("MIC", `Session activated: ${code}`);
-      return true;
-    }
-    return false;
-  });
-  ipcMain.handle("mic-get-peer-id", () => playerPeerId);
   ipcMain.handle("get-volume", async () => getVolume());
   ipcMain.handle("romanize", async (event, rawJapanese) => {
     const romaji = await kuroshiro.convert(rawJapanese, {
@@ -548,48 +434,6 @@ app.whenReady().then(() => {
         delete knownRemotes[socket.id];
       });
       return;
-    }
-
-    const details = socket.handshake.auth;
-    if (details && details.name) {
-      logger.info("CAST", `YT Cast Connection from ${details.name}`);
-      const player = new SocketPlayer(socket);
-      const receiver = new YouTubeCastReceiver(player, {
-        device: {
-          name: details.name,
-          screenName: details.screenName,
-          brand: details.brand,
-          model: details.model,
-        },
-      });
-      receiver.on("senderConnect", (sender) =>
-        socket.emit("clientConnected", sender),
-      );
-      receiver.on("senderDisconnect", (sender) =>
-        socket.emit("clientDisconnect", sender),
-      );
-      try {
-        await receiver.start();
-        socket.emit("success");
-      } catch (error) {
-        socket.emit("error", error);
-      }
-      socket.on("volume", (v) => player.setVolume({ level: v, muted: false }));
-      socket.on("duration", (d) => player.setDuration(d));
-      socket.on("position", (p) => player.setPosition(p));
-      socket.on("finishedPlaying", async () => {
-        player.resetPosition();
-        await player.pause();
-        await player.next();
-      });
-      socket.on("disconnect", async () => {
-        logger.info("CAST", "App disconnected, stopping receiver");
-        try {
-          await receiver.stop();
-        } catch (e) {
-          logger.error("CAST", e.message);
-        }
-      });
     }
   });
 

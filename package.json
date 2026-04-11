@@ -32,7 +32,6 @@
     "cors": "^2.8.5",
     "electron-squirrel-startup": "^1.0.1",
     "express": "^4.19.2",
-    "japanese": "^1.1.0",
     "kuroshiro": "^1.2.0",
     "kuroshiro-analyzer-kuromoji": "^1.1.0",
     "loudness": "^0.4.2",
@@ -40,12 +39,8 @@
     "qrcode": "^1.5.3",
     "socket.io": "^4.7.5",
     "socket.io-client": "^4.8.3",
-    "spessasynth_lib": "^4.2.11",
     "systeminformation": "^5.31.1",
-    "youtube-search-api": "^2.0.1",
-    "youtubei.js": "^15.0.1",
-    "yt-cast-receiver": "^1.2.4",
-    "ytdlp-nodejs": "^2.3.4"
+    "youtube-search-api": "^2.0.1"
   },
   "devDependencies": {
     "@electron-forge/cli": "^7.4.0",
@@ -56,7 +51,7 @@
     "@electron-forge/plugin-auto-unpack-natives": "^7.4.0",
     "@electron-forge/plugin-fuses": "^7.4.0",
     "@electron/fuses": "^1.8.0",
-    "electron": "^38.0.0",
+    "electron": "^41.2.0",
     "electron-winstaller": "^5.4.0"
   }
 }
