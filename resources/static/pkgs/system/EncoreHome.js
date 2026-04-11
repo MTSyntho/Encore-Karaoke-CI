@@ -99,7 +99,8 @@ class EncoreController {
       activeSockets: {},
       typingUsers: new Set(),
       cheerQueue: [],
-      isCheering: false,
+      activeCheerCount: 0,
+      activeCheers: [],
     };
 
     this.bumperImages = [];
@@ -667,43 +668,6 @@ class EncoreController {
     this.dom.midiLineDisplay2 = new Html("div")
       .classOn("lyric-line", "midi-lyric-line", "next")
       .appendTo(this.dom.midiContainer);
-
-    this.dom.cheerOverlayContainer = new Html("div")
-      .classOn("cheer-overlay-container")
-      .styleJs({
-        position: "absolute",
-        top: "20px",
-        left: "-500px",
-        zIndex: "9000",
-        transition: "all 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275)",
-        backgroundColor: "rgba(20, 20, 30, 0.9)",
-        border: "2px solid #ffd700",
-        borderRadius: "15px",
-        padding: "15px 25px",
-        display: "flex",
-        flexDirection: "column",
-        boxShadow: "0 10px 25px rgba(0,0,0,0.5)",
-        maxWidth: "400px",
-      })
-      .appendTo(this.wrapper);
-
-    this.dom.cheerHeader = new Html("div")
-      .styleJs({
-        color: "#ffd700",
-        fontWeight: "700",
-        fontSize: "1.2rem",
-        marginBottom: "5px",
-      })
-      .appendTo(this.dom.cheerOverlayContainer);
-
-    this.dom.cheerMessage = new Html("div")
-      .styleJs({
-        color: "#fff",
-        fontSize: "1.5rem",
-        fontWeight: "600",
-        wordWrap: "break-word",
-      })
-      .appendTo(this.dom.cheerOverlayContainer);
   }
 
   /**
@@ -807,25 +771,92 @@ class EncoreController {
   }
 
   /**
-   * Processes the queue of incoming cheers and sequentially shows their overlay animations.
+   * Processes the queue of incoming cheers and displays them concurrently (stacked).
    */
   processCheerQueue() {
-    if (this.state.isCheering || this.state.cheerQueue.length === 0) return;
+    if (this.state.cheerQueue.length === 0) return;
 
-    this.state.isCheering = true;
-    const cheer = this.state.cheerQueue.shift();
+    // Process all queued cheers concurrently
+    while (this.state.cheerQueue.length > 0) {
+      const cheer = this.state.cheerQueue.shift();
+      this.displayCheer(cheer);
+    }
+  }
 
-    this.dom.cheerHeader.html(`🎉 <span>${cheer.nickname}</span> cheers:`);
-    this.dom.cheerMessage.text(cheer.message);
-    this.dom.cheerOverlayContainer.styleJs({ left: "20px" });
+  /**
+   * Displays a single cheer with its own animation and cleanup.
+   * Multiple cheers are stacked vertically.
+   *
+   * @param {Object} cheer - The cheer object with nickname and message.
+   */
+  displayCheer(cheer) {
+    const cheerContainer = new Html("div")
+      .classOn("cheer-overlay-container")
+      .styleJs({
+        position: "absolute",
+        top: `calc(20px + var(--cheer-index, 0) * 110px)`,
+        left: "-500px",
+        zIndex: `calc(9000 + var(--cheer-index, 0))`,
+        transition: "all 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275)",
+        backgroundColor: "rgba(20, 20, 30, 0.9)",
+        border: "2px solid #ffd700",
+        borderRadius: "15px",
+        padding: "15px 25px",
+        display: "flex",
+        flexDirection: "column",
+        boxShadow: "0 10px 25px rgba(0,0,0,0.5)",
+        maxWidth: "400px",
+      })
+      .appendTo(this.wrapper);
+
+    new Html("div")
+      .styleJs({
+        color: "#ffd700",
+        fontWeight: "700",
+        fontSize: "1.2rem",
+        marginBottom: "5px",
+      })
+      .html(`🎉 <span>${cheer.nickname}</span> cheers:`)
+      .appendTo(cheerContainer);
+
+    new Html("div")
+      .styleJs({
+        color: "#fff",
+        fontSize: "1.5rem",
+        fontWeight: "600",
+        wordWrap: "break-word",
+      })
+      .text(cheer.message)
+      .appendTo(cheerContainer);
+
+    this.state.activeCheers.push(cheerContainer);
+    this.repositionCheers();
 
     setTimeout(() => {
-      this.dom.cheerOverlayContainer.styleJs({ left: "-500px" });
+      cheerContainer.styleJs({ left: "20px" });
+    }, 10);
+
+    setTimeout(() => {
+      cheerContainer.styleJs({ left: "-500px" });
       setTimeout(() => {
-        this.state.isCheering = false;
-        this.processCheerQueue();
+        const index = this.state.activeCheers.indexOf(cheerContainer);
+        if (index > -1) {
+          this.state.activeCheers.splice(index, 1);
+          cheerContainer.cleanup();
+          this.repositionCheers();
+        }
       }, 600);
-    }, 5000);
+    }, 5500);
+  }
+
+  /**
+   * Reposition all active cheers based on their index in the array.
+   * CSS custom properties handle the actual positioning and animation.
+   */
+  repositionCheers() {
+    this.state.activeCheers.forEach((cheerContainer, index) => {
+      cheerContainer.elm.style.setProperty("--cheer-index", index);
+    });
   }
 
   /**
