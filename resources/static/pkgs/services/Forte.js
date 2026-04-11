@@ -1,7 +1,8 @@
 import {
-  Synthetizer,
+  WorkletSynthesizer as Synthetizer,
   Sequencer,
-} from "https://cdn.jsdelivr.net/npm/spessasynth_lib@3.27.8/+esm";
+} from "https://cdn.jsdelivr.net/npm/spessasynth_lib@4.2.10/+esm";
+import { BasicMIDI } from "https://cdn.jsdelivr.net/npm/spessasynth_core@4.2.8/+esm";
 import Html from "/libs/html.js";
 import { PitchDetector } from "https://cdn.jsdelivr.net/npm/pitchy@4.1.0/+esm";
 
@@ -153,6 +154,34 @@ function logVerboseWarn(message, ...args) {
 }
 
 /**
+ * Safely binds an event callback to a SpessaSynth v4 event handler.
+ * Wrapped in try/catch and existence checks to prevent undefined map crashes.
+ */
+function bindSpessaEvent(handler, eventName, id, callback) {
+  if (!handler || !handler.events) {
+    return;
+  }
+
+  if (handler.events[eventName] !== undefined) {
+    try {
+      if (typeof handler.addEvent === "function") {
+        handler.addEvent(eventName, id, callback);
+        return;
+      }
+      if (typeof handler.events[eventName].set === "function") {
+        handler.events[eventName].set(id, callback);
+      } else {
+        handler.events[eventName][id] = callback;
+      }
+    } catch (e) {
+      logVerboseWarn(`Error binding event '${eventName}': ${e.message}`);
+    }
+  } else {
+    logVerboseWarn(`Event '${eventName}' does not exist on this handler.`);
+  }
+}
+
+/**
  * Updates the effective SFX gain based on main volume and SFX-specific volume.
  * The effective gain is the product of both volumes, allowing SFX to react relatively to main volume.
  */
@@ -257,6 +286,13 @@ const state = {
     sfxVolume: 1,
     smoothedTime: 0,
     lastFrameTime: 0,
+    midiInfo: {
+      ticks: [],
+      timeDivision: 480,
+      tempoChanges: [],
+      initialBpm: 120,
+      keyRange: { min: 0, max: 127 },
+    },
   },
   recording: {
     destinationNode: null,
@@ -612,10 +648,15 @@ function timingLoop() {
     );
   }
 
+  // End of track detection fallback
   if (engineTime >= duration && duration > 0) {
     animationFrameId = null;
+    if (state.playback.status === "playing") {
+      pkg.data.stopTrack();
+    }
     return;
   }
+
   animationFrameId = requestAnimationFrame(timingLoop);
 }
 
@@ -883,15 +924,17 @@ const pkg = {
 
       try {
         await audioContext.audioWorklet.addModule(
-          "/libs/spessasynth_lib/synthetizer/worklet_processor.min.js",
+          "/libs/spessasynth_lib/dist/spessasynth_processor.min.js",
         );
         const soundFontUrl = "/libs/soundfonts/SAM2695.sf2";
         const soundFontBuffer = await (await fetch(soundFontUrl)).arrayBuffer();
 
-        state.playback.synthesizer = new Synthetizer(
-          state.playback.midiGain,
+        state.playback.synthesizer = new Synthetizer(audioContext);
+        await state.playback.synthesizer.soundBankManager.addSoundBank(
           soundFontBuffer,
         );
+        state.playback.synthesizer.connect(state.playback.midiGain);
+
         console.log("[FORTE SVC] MIDI Synthesizer initialized successfully.");
       } catch (synthError) {
         console.error(
@@ -1007,25 +1050,43 @@ const pkg = {
               0.01,
             );
 
-            sfxSequencer = new Sequencer(
-              [{ binary: cached.buffer }],
-              state.playback.synthesizer,
-            );
+            sfxSequencer = new Sequencer(state.playback.synthesizer);
             sfxSequencer.loop = false;
-            sfxSequencer.addOnSongEndedEvent(() => {
-              if (sfxMidiOriginalVolume !== null) {
-                state.playback.midiGain.gain.setTargetAtTime(
-                  sfxMidiOriginalVolume,
-                  audioContext.currentTime,
-                  0.01,
-                );
-                sfxMidiOriginalVolume = null;
-              }
-              if (sfxResolve) {
-                sfxResolve(true);
-                sfxResolve = null;
-              }
-            }, "forte-sfx-end");
+
+            let sfxMidiData;
+            try {
+              sfxMidiData = BasicMIDI.fromArrayBuffer(cached.buffer);
+            } catch (e) {
+              sfxMidiData = { binary: cached.buffer };
+            }
+            sfxSequencer.loadNewSongList([sfxMidiData]);
+            sfxSequencer.play();
+
+            bindSpessaEvent(
+              sfxSequencer.eventHandler,
+              "songEnded",
+              "forte-sfx-end",
+              () => {
+                if (sfxMidiOriginalVolume !== null && state.playback.midiGain) {
+                  state.playback.midiGain.gain.setTargetAtTime(
+                    sfxMidiOriginalVolume,
+                    audioContext.currentTime,
+                    0.01,
+                  );
+                  sfxMidiOriginalVolume = null;
+                }
+                if (sfxResolve) {
+                  sfxResolve(true);
+                  sfxResolve = null;
+                }
+                if (sfxSequencer) {
+                  try {
+                    sfxSequencer.pause();
+                  } catch (e) {}
+                  sfxSequencer = null;
+                }
+              },
+            );
           } else {
             sfxSourceNode = audioContext.createBufferSource();
             sfxSourceNode.buffer = cached.buffer;
@@ -1059,7 +1120,12 @@ const pkg = {
         sfxSourceNode = null;
       }
       if (sfxSequencer) {
-        sfxSequencer.stop();
+        try {
+          sfxSequencer.pause();
+        } catch (e) {}
+        try {
+          sfxSequencer.currentTime = 0;
+        } catch (e) {}
         sfxSequencer = null;
 
         if (sfxMidiOriginalVolume !== null && state.playback.midiGain) {
@@ -1150,29 +1216,34 @@ const pkg = {
         pkg.data.stopTrack();
       }
 
-      logVerbose(`Swapping SoundFont with: ${url}`);
+      logVerbose(`Swapping SoundBank with: ${url}`);
 
       try {
         const response = await fetch(url);
         const arrayBuffer = await response.arrayBuffer();
 
         if (state.playback.synthesizer) {
+          state.playback.synthesizer.disconnect();
           state.playback.synthesizer = null;
         }
 
-        state.playback.synthesizer = new Synthetizer(
-          state.playback.midiGain,
+        state.playback.synthesizer = new Synthetizer(audioContext);
+        await state.playback.synthesizer.soundBankManager.addSoundBank(
           arrayBuffer,
         );
+        state.playback.synthesizer.connect(state.playback.midiGain);
 
         if (state.playback.transpose !== 0) {
-          state.playback.synthesizer.transpose(state.playback.transpose);
+          state.playback.synthesizer.setMasterParameter(
+            "transposition",
+            state.playback.transpose,
+          );
         }
 
-        logVerbose("New SoundFont loaded and Synthesizer recreated.");
+        logVerbose("New SoundBank loaded and Synthesizer recreated.");
         return true;
       } catch (e) {
-        console.error(`[FORTE SVC] Failed to load custom SoundFont: ${url}`, e);
+        console.error(`[FORTE SVC] Failed to load custom SoundBank: ${url}`, e);
         return false;
       }
     },
@@ -1188,9 +1259,23 @@ const pkg = {
       if (state.playback.status !== "stopped") pkg.data.stopTrack();
 
       if (state.playback.sequencer) {
-        state.playback.sequencer.stop();
+        try {
+          state.playback.sequencer.pause();
+        } catch (e) {}
+        try {
+          state.playback.sequencer.currentTime = 0;
+        } catch (e) {}
         state.playback.sequencer = null;
       }
+
+      state.playback.midiInfo = {
+        ticks: [],
+        timeDivision: 480,
+        tempoChanges: [],
+        initialBpm: 120,
+        keyRange: { min: 0, max: 127 },
+      };
+
       state.playback.decodedLyrics = [];
       state.playback.lyricsEncoding = "utf-8";
       state.playback.transpose = 0;
@@ -1229,39 +1314,47 @@ const pkg = {
         if (isMidi) {
           if (!state.playback.synthesizer)
             throw new Error("MIDI Synthesizer not ready.");
-          state.playback.sequencer = new Sequencer(
-            [{ binary: arrayBuffer }],
-            state.playback.synthesizer,
-          );
-          state.playback.sequencer.stop();
+
+          let parsedMidi;
+          try {
+            parsedMidi = BasicMIDI.fromArrayBuffer(arrayBuffer);
+          } catch (e) {
+            console.error("[FORTE SVC] BasicMIDI parsing failed:", e);
+            throw e;
+          }
+
+          state.playback.sequencer = new Sequencer(state.playback.synthesizer);
           state.playback.sequencer.loop = false;
 
-          state.playback.sequencer.addOnSongEndedEvent(() => {
-            if (state.playback.status !== "stopped") pkg.data.stopTrack();
-          }, "forte-song-end");
-
-          state.playback.sequencer.addOnTempoChangeEvent((bpm) => {
-            logVerbose("Tempo change", bpm);
-            document.dispatchEvent(
-              new CustomEvent("CherryTree.Forte.Playback.TempoEvent", {
-                detail: { bpm },
-              }),
-            );
-          }, "forte-tempo-change");
+          bindSpessaEvent(
+            state.playback.sequencer.eventHandler,
+            "songEnded",
+            "forte-song-end",
+            () => {
+              if (state.playback.status !== "stopped") pkg.data.stopTrack();
+            },
+          );
 
           logVerbose("Sequencer loaded", state.playback.sequencer);
           logVerbose("Synthesizer", state.playback.synthesizer);
 
-          for (const channel of state.playback.synthesizer.channelProperties) {
+          for (const channel of state.playback.synthesizer.midiChannels || []) {
             console.log("Midi channel", channel);
           }
 
-          state.playback.synthesizer.eventHandler.events.noteon = {
-            NoteEventHandler: (e) => {
-              if (
-                state.playback.synthesizer.channelProperties[e.channel]
-                  .isDrum == false
-              ) {
+          bindSpessaEvent(
+            state.playback.synthesizer.eventHandler,
+            "noteOn",
+            "forte-note-on",
+            (e) => {
+              const isDrum = state.playback.synthesizer.midiChannels
+                ? (state.playback.synthesizer.midiChannels[e.channel]?.preset
+                    ?.isGMGSDrum ??
+                  state.playback.synthesizer.midiChannels[e.channel]?.isDrum ??
+                  e.channel === 9)
+                : e.channel === 9;
+
+              if (!isDrum) {
                 if (e.velocity > 0) {
                   state.scoring.activeMidiNotes.add(e.midiNote);
                 } else {
@@ -1269,77 +1362,43 @@ const pkg = {
                 }
               }
             },
-          };
+          );
 
-          state.playback.synthesizer.eventHandler.events.noteoff = {
-            NoteEventHandler: (e) => {
-              if (
-                state.playback.synthesizer.channelProperties[e.channel]
-                  .isDrum == false
-              ) {
+          bindSpessaEvent(
+            state.playback.synthesizer.eventHandler,
+            "noteOff",
+            "forte-note-off",
+            (e) => {
+              const isDrum = state.playback.synthesizer.midiChannels
+                ? (state.playback.synthesizer.midiChannels[e.channel]?.preset
+                    ?.isGMGSDrum ??
+                  state.playback.synthesizer.midiChannels[e.channel]?.isDrum ??
+                  e.channel === 9)
+                : e.channel === 9;
+
+              if (!isDrum) {
                 state.scoring.activeMidiNotes.delete(e.midiNote);
               }
             },
-          };
-
-          logVerbose(
-            "Synthesizer event handlers",
-            state.playback.synthesizer.eventHandler,
           );
 
-          await new Promise((resolve) => {
-            state.playback.sequencer.addOnSongChangeEvent(() => {
-              const midiData = state.playback.sequencer.midiData;
-              const rawLyrics = midiData.lyrics;
-
-              state.playback.midiInfo = {
-                ticks: midiData.lyricsTicks || [],
-                timeDivision: midiData.timeDivision || 480,
-                tempoChanges: midiData.tempoChanges || [],
-                initialBpm: 120,
-                keyRange: midiData.keyRange || { min: 0, max: 127 },
-              };
-
-              if (midiData.tempoChanges && midiData.tempoChanges.length > 0) {
-                state.playback.midiInfo.initialBpm = Math.round(
-                  midiData.tempoChanges[0].tempo,
-                );
-              }
-
-              if (rawLyrics && rawLyrics.length > 0) {
-                const totalLength = rawLyrics.reduce(
-                  (acc, val) => acc + val.byteLength,
-                  0,
-                );
-                const combinedBuffer = new Uint8Array(totalLength);
-                let offset = 0;
-                for (const buffer of rawLyrics) {
-                  combinedBuffer.set(new Uint8Array(buffer), offset);
-                  offset += buffer.byteLength;
-                }
-
-                state.playback.lyricsEncoding = detectEncoding(combinedBuffer);
-                const decoder = new TextDecoder(state.playback.lyricsEncoding);
-
-                state.playback.decodedLyrics = rawLyrics
-                  .map((lyricBuffer) => decoder.decode(lyricBuffer))
-                  .filter((text) => {
-                    const clean = text.replace(/[\r\n\/\\]/g, "");
-                    return !clean.startsWith("@") && !clean.startsWith("#");
-                  });
-              } else {
-                state.playback.lyricsEncoding = "utf-8";
-              }
-              resolve();
-            }, "forte-loader");
-          });
-
           let displayableLyricIndex = 0;
-          state.playback.sequencer.onTextEvent = (messageData, messageType) => {
-            if (messageType === 5) {
+
+          bindSpessaEvent(
+            state.playback.sequencer.eventHandler,
+            "metaEvent",
+            "forte-meta",
+            (e) => {
+              if (!e) return;
+
+              const dataArray = e.event.data;
+
+              logVerbose("SpessaSynth event", e);
+              logVerbose("Lyric / text event", dataArray);
+              if (!dataArray || !(dataArray instanceof Uint8Array)) return;
               const text = new TextDecoder(
                 state.playback.lyricsEncoding,
-              ).decode(messageData.buffer);
+              ).decode(dataArray);
               const cleanText = text.replace(/[\r\n\/\\]/g, "");
               if (
                 cleanText &&
@@ -1353,8 +1412,58 @@ const pkg = {
                 );
                 displayableLyricIndex++;
               }
-            }
+            },
+          );
+
+          state.playback.sequencer.loadNewSongList([parsedMidi]);
+          const rawLyrics = parsedMidi.lyrics || [];
+
+          state.playback.midiInfo = {
+            ticks: rawLyrics
+              .map((msg) => msg.ticks)
+              .filter((t) => t !== undefined),
+            timeDivision: parsedMidi.timeDivision || 480,
+            tempoChanges: parsedMidi.tempoChanges || [],
+            initialBpm: 120,
+            keyRange: parsedMidi.keyRange || { min: 0, max: 127 },
           };
+
+          if (parsedMidi.tempoChanges && parsedMidi.tempoChanges.length > 0) {
+            state.playback.midiInfo.initialBpm = Math.round(
+              parsedMidi.tempoChanges[0].tempo || 120,
+            );
+          }
+
+          if (rawLyrics.length > 0) {
+            const totalLength = rawLyrics.reduce(
+              (acc, val) => acc + (val.data ? val.data.byteLength : 0),
+              0,
+            );
+            const combinedBuffer = new Uint8Array(totalLength);
+            let offset = 0;
+            for (const message of rawLyrics) {
+              if (message.data) {
+                combinedBuffer.set(message.data, offset);
+                offset += message.data.byteLength;
+              }
+            }
+
+            state.playback.lyricsEncoding = detectEncoding(combinedBuffer);
+            const decoder = new TextDecoder(state.playback.lyricsEncoding);
+
+            state.playback.decodedLyrics = rawLyrics
+              .map((message) =>
+                message.data ? decoder.decode(message.data) : "",
+              )
+              .map((text) => text.replace(/[\/\\]/g, "\n"))
+              .filter((text) => {
+                const clean = text.replace(/[\r\n\/\\]/g, "");
+                return !clean.startsWith("@") && !clean.startsWith("#");
+              });
+          } else {
+            state.playback.lyricsEncoding = "utf-8";
+          }
+
           state.playback.buffer = null;
         } else {
           state.playback.buffer =
@@ -1548,7 +1657,11 @@ const pkg = {
       }
 
       if (state.playback.isMidi) {
-        state.playback.sequencer.pause();
+        if (state.playback.sequencer) {
+          try {
+            state.playback.sequencer.pause();
+          } catch (e) {}
+        }
         state.playback.status = "paused";
       } else {
         if (!sourceNode) return;
@@ -1595,7 +1708,14 @@ const pkg = {
       }
 
       if (state.playback.isMidi) {
-        if (state.playback.sequencer) state.playback.sequencer.stop();
+        if (state.playback.sequencer) {
+          try {
+            state.playback.sequencer.pause();
+          } catch (e) {}
+          try {
+            state.playback.sequencer.currentTime = 0;
+          } catch (e) {}
+        }
       } else {
         if (sourceNode) {
           sourceNode.onended = null;
@@ -1701,7 +1821,7 @@ const pkg = {
       }
       state.playback.transpose = clamped;
       if (state.playback.isMidi && state.playback.synthesizer) {
-        state.playback.synthesizer.transpose(clamped);
+        state.playback.synthesizer.setMasterParameter("transposition", clamped);
       } else if (!state.playback.isMidi && sourceNode) {
         sourceNode.playbackRate.setValueAtTime(
           Math.pow(2, clamped / 12),
@@ -1733,10 +1853,8 @@ const pkg = {
       let currentTime = 0;
 
       if (state.playback.isMidi && state.playback.sequencer) {
-        if (state.playback.sequencer.midiData) {
-          duration = state.playback.sequencer.duration;
-          currentTime = state.playback.sequencer.currentTime;
-        }
+        duration = state.playback.sequencer.duration || 0;
+        currentTime = state.playback.sequencer.currentTime || 0;
       } else if (state.playback.buffer) {
         duration = state.playback.buffer.duration;
         if (state.playback.status === "playing" && sourceNode) {
@@ -2225,7 +2343,10 @@ const pkg = {
     sfxCache.clear();
 
     if (animationFrameId) cancelAnimationFrame(animationFrameId);
-    if (state.playback.synthesizer) state.playback.synthesizer.close();
+    if (state.playback.synthesizer) {
+      state.playback.synthesizer.disconnect();
+      state.playback.synthesizer = null;
+    }
   },
 };
 
