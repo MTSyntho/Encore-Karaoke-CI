@@ -16,8 +16,6 @@ const qrcode = require("qrcode");
 
 const { setVolume, getVolume } = require("loudness");
 
-console.log("get volume", getVolume);
-
 const KuromojiAnalyzer = require("kuroshiro-analyzer-kuromoji");
 const Kuroshiro = require("kuroshiro").default;
 const youtubesearchapi = require("youtube-search-api");
