@@ -1913,6 +1913,18 @@ class EncoreController {
               opacity: "1",
               pointerEvents: "all",
             });
+            if (this.allMidiSyllables && this.allMidiSyllables.length > 0) {
+              this.allMidiSyllables.forEach((s) => {
+                if (s.domElement) {
+                  s.domElement.classOff("active", "completed");
+                }
+              });
+              this.lastCompletedSyllableIndex = -1;
+            }
+            this.dom.lrcLineDisplay1.classOff("active", "next");
+            this.dom.lrcLineDisplay2.classOff("active", "next");
+            this.dom.midiLineDisplay1.classOff("active", "next");
+            this.dom.midiLineDisplay2.classOff("active", "next");
           }
         }
       }
