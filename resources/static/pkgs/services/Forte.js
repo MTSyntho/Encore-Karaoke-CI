@@ -1188,6 +1188,48 @@ const pkg = {
     },
 
     /**
+     * Sets the container element for piano roll UI components.
+     * Moves the piano roll elements from their current parent to the specified container.
+     *
+     * @param {HTMLElement|string} containerSelector - DOM element or CSS selector string.
+     * @returns {boolean} True if successfully moved, false if container not found.
+     */
+    setPianoRollContainer: (containerSelector) => {
+      try {
+        let container;
+        if (typeof containerSelector === "string") {
+          container = Html.qs(containerSelector);
+        } else {
+          container = containerSelector;
+        }
+
+        if (!container) {
+          console.error(
+            "[FORTE SVC] Invalid piano roll container",
+            containerSelector,
+          );
+          return false;
+        }
+
+        if (pianoRollContainer) {
+          pianoRollContainer.appendTo(container);
+          logVerbose("Piano roll container moved", container.elm);
+        }
+
+        if (scoreReasonDisplay) {
+          scoreReasonDisplay.appendTo(container);
+          logVerbose("Score reason display moved", container.elm);
+        }
+
+        return true;
+      } catch (e) {
+        console.error("[FORTE SVC] Failed to move piano roll container:", e);
+        return false;
+      }
+      return false;
+    },
+
+    /**
      * Determines CSS layout presentation showing the pitch mapping visualization layer.
      *
      * @param {boolean} bool - True enforcing visible traits.

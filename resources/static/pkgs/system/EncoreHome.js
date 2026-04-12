@@ -149,6 +149,7 @@ class EncoreController {
   async init() {
     this.wrapper = new Html("div").classOn("full-ui").appendTo("body");
     this.wrapper.classOn("loading");
+    this.Forte.setPianoRollContainer(this.wrapper);
 
     this.state.windowsVolume = await window.volume.getVolume();
     console.log("[Encore] Windows volume", this.state.windowsVolume);
