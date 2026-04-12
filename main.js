@@ -242,6 +242,7 @@ let zoomFactor = Config.getItem("zoomLevel") || 1;
 // Main App Startup
 const createWindow = () => {
   const win = new BrowserWindow({
+    title: `Encore Karaoke ${versionInformation.channel} ${versionInformation.number} (${versionInformation.codename})`,
     width: 1280,
     height: 752,
     icon: "resources/icon.png",
