@@ -84,10 +84,15 @@ export class InfoBarModule {
    * Display default information based on application state (recording or up next song)
    */
   showDefault() {
-    if (this.checkRecording && this.checkRecording()) {
-      this.show("RECORDING", "REC ●");
-      this.showBar();
-      return;
+    if (this.checkRecording) {
+      const recStatus = this.checkRecording();
+      if (recStatus) {
+        const textToDisplay =
+          typeof recStatus === "string" ? recStatus : "REC ●";
+        this.show("RECORDING", textToDisplay);
+        this.showBar();
+        return;
+      }
     }
     const { reservationQueue } = this.getState();
     if (reservationQueue.length > 0) {

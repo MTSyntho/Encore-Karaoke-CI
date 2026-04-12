@@ -118,7 +118,10 @@ class EncoreController {
         reservationQueue: this.state.reservationQueue,
         songMap: this.songMap,
       }),
-      () => (this.recorder ? this.recorder.isRecording : false),
+      () =>
+        this.recorder && this.recorder.isRecording
+          ? `REC <span style="color: #ff5555">●</span> ${this.recorder.getRecordingTimeString()}`
+          : false,
       (s) => this.getFormatInfo(s),
     );
     this.recorder = new RecorderModule(

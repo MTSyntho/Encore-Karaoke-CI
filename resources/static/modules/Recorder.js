@@ -13,6 +13,8 @@ export class RecorderModule {
     this.isRecording = false;
     this.mediaRecorder = null;
     this.recordedChunks = [];
+    this.recordingStartTime = 0;
+    this.recordingInterval = null;
     this.animationFrameId = null;
     this.currentSongInfo = null;
     this.uiRefs = null;
@@ -45,6 +47,19 @@ export class RecorderModule {
     this.cachedInterludeTip = "";
 
     console.log("[RECORDER] Video Recording feature initialized.");
+  }
+
+  /**
+   * Calculates formatted elapsed recording time (MM:SS)
+   */
+  getRecordingTimeString() {
+    if (!this.isRecording) return "00:00";
+    const elapsed = Math.floor((Date.now() - this.recordingStartTime) / 1000);
+    const mins = Math.floor(elapsed / 60)
+      .toString()
+      .padStart(2, "0");
+    const secs = (elapsed % 60).toString().padStart(2, "0");
+    return `${mins}:${secs}`;
   }
 
   /**
@@ -231,25 +246,39 @@ export class RecorderModule {
       if (event.data.size > 0) this.recordedChunks.push(event.data);
     };
 
-    this.mediaRecorder.onstop = () => {
+    this.mediaRecorder.onstop = async () => {
       const blob = new Blob(this.recordedChunks, { type: "video/webm" });
       this.recordedChunks = [];
 
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      document.body.appendChild(a);
-      a.style = "display: none";
-      a.href = url;
-      a.download = `Encore-Recording-${new Date().toISOString().replace(/:/g, "-")}.webm`;
-      a.click();
-      window.URL.revokeObjectURL(url);
-      a.remove();
-      this.infoBar.showTemp(
-        "RECORDING",
-        "Recording saved to Downloads folder.",
-        5000,
-      );
+      this.infoBar.showTemp("RECORDING", "Saving to Videos folder...", 3000);
+
+      try {
+        const arrayBuffer = await blob.arrayBuffer();
+        const result = await window.desktopIntegration.ipc.invoke(
+          "save-recording",
+          arrayBuffer,
+        );
+
+        if (result.success) {
+          this.infoBar.showTemp(
+            "RECORDING",
+            "Saved to Encore Recordings!",
+            5000,
+          );
+        } else {
+          this.infoBar.showTemp("RECORDING", "Failed to save recording.", 5000);
+        }
+      } catch (e) {
+        console.error("Save error:", e);
+        this.infoBar.showTemp("RECORDING", "Failed to save recording.", 5000);
+      }
     };
+
+    this.recordingStartTime = Date.now();
+    if (this.recordingInterval) clearInterval(this.recordingInterval);
+    this.recordingInterval = setInterval(() => {
+      if (this.isRecording) this.infoBar.showDefault();
+    }, 1000);
 
     this.mediaRecorder.start();
     this.isRecording = true;
@@ -265,6 +294,11 @@ export class RecorderModule {
 
     this.mediaRecorder.stop();
     this.isRecording = false;
+
+    if (this.recordingInterval) {
+      clearInterval(this.recordingInterval);
+      this.recordingInterval = null;
+    }
 
     if (this.animationFrameId) {
       cancelAnimationFrame(this.animationFrameId);

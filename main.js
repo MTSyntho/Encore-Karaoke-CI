@@ -64,7 +64,10 @@ const kuroshiro = new Kuroshiro();
 kuroshiro.init(new KuromojiAnalyzer());
 
 const userData = app.getPath("userData");
+const userVidoes = app.getPath("videos");
 logger.info("SYSTEM", `User Data Path: ${userData}`);
+logger.info("SYSTEM", `User Videos Path: ${userData}`);
+
 try {
   Config.init(userData);
   logger.info("CONFIG", "Configuration loaded successfully.");
@@ -495,6 +498,27 @@ app.whenReady().then(() => {
     return romaji;
   });
   ipcMain.on("set-volume", async (event, vol) => setVolume(vol));
+  ipcMain.handle("save-recording", async (event, arrayBuffer) => {
+    try {
+      const buffer = Buffer.from(arrayBuffer);
+      const videosDir = path.join(app.getPath("videos"), "Encore Recordings");
+
+      if (!fs.existsSync(videosDir)) {
+        fs.mkdirSync(videosDir, { recursive: true });
+      }
+
+      const filename = `Encore-Recording-${new Date().toISOString().replace(/:/g, "-")}.webm`;
+      const filePath = path.join(videosDir, filename);
+
+      await fs.promises.writeFile(filePath, buffer);
+      logger.info("SYSTEM", `Recording saved silently to: ${filePath}`);
+      return { success: true, path: filePath };
+    } catch (error) {
+      logger.error("SYSTEM", `Failed to save recording: ${error.message}`);
+      return { success: false, error: error.message };
+    }
+  });
+
   ipcMain.on("setRPC", (event, arg) => {
     discordClient.user?.setActivity({
       state: arg.state,
