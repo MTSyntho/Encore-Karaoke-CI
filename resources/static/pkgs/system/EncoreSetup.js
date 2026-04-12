@@ -270,15 +270,6 @@ class EncoreSetupController {
             },
           },
           {
-            id: "test",
-            label: "Test Audio Output",
-            type: "action",
-            action: () => {
-              this.Forte.playSfx("/assets/audio/fanfare.mid");
-              this.showToast("PLAYING TEST SOUND...", "info");
-            },
-          },
-          {
             id: "vol",
             label: "Master Volume",
             type: "range",
@@ -297,6 +288,15 @@ class EncoreSetupController {
               this.config.audioConfig.mix.instrumental.volume = val;
               window.config.setItem("audioConfig.mix.instrumental.volume", val);
               this.Forte.setTrackVolume(val);
+            },
+          },
+          {
+            id: "test",
+            label: "Test Audio Output",
+            type: "action",
+            action: () => {
+              this.Forte.playSfx("/assets/audio/fanfare.mid");
+              this.showToast("PLAYING TEST SOUND...", "info");
             },
           },
         ],
