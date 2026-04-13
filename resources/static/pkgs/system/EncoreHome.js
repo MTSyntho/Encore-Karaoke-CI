@@ -274,6 +274,7 @@ class EncoreController {
           isAbsolute: true,
         });
       });
+
       const mtvPaths = this.songList
         .filter((s) => s.videoPath)
         .map((s) => s.videoPath);
@@ -283,6 +284,20 @@ class EncoreController {
           BGV_LIST: mtvPaths,
           isAbsolute: true,
         });
+
+      try {
+        const userBgvs = await this.FsSvc.getUserBGVs();
+        if (userBgvs && userBgvs.length > 0) {
+          this.bgv.addDynamicCategory({
+            BGV_CATEGORY: "User BGV",
+            BGV_LIST: userBgvs,
+            isAbsolute: true,
+          });
+          console.log(`[Encore] Loaded ${userBgvs.length} User BGVs.`);
+        }
+      } catch (e) {
+        console.error("[Encore] Failed to initialize User BGVs:", e);
+      }
     }
 
     const bumperPaths =

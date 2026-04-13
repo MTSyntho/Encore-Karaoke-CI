@@ -359,6 +359,22 @@ const pkg = {
         manifest: state.currentManifest,
       };
     },
+
+    /**
+     * Fetches a list of custom user Background Videos.
+     * @returns {Promise<Array<string>>}
+     */
+    getUserBGVs: async () => {
+      const url = `http://localhost:9864/user-bgv-list`;
+      try {
+        const res = await fetch(url);
+        if (!res.ok) return [];
+        return await res.json();
+      } catch (err) {
+        console.error("[FsSvc] Failed to fetch User BGVs:", err);
+        return [];
+      }
+    },
   },
 
   end: async function () {

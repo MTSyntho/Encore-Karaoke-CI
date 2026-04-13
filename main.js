@@ -66,7 +66,17 @@ kuroshiro.init(new KuromojiAnalyzer());
 const userData = app.getPath("userData");
 const userVideos = app.getPath("videos");
 logger.info("SYSTEM", `User Data Path: ${userData}`);
-logger.info("SYSTEM", `User Videos Path: ${userData}`);
+logger.info("SYSTEM", `User Videos Path: ${userVideos}`);
+
+const userBGVDir = path.join(userVideos, "Encore User BGV");
+try {
+  if (!fs.existsSync(userBGVDir)) {
+    fs.mkdirSync(userBGVDir, { recursive: true });
+    logger.info("SYSTEM", `Created User BGV directory at: ${userBGVDir}`);
+  }
+} catch (e) {
+  logger.error("SYSTEM", `Failed to create User BGV directory: ${e.message}`);
+}
 
 try {
   Config.init(userData);
@@ -146,6 +156,24 @@ server.get("/drives", async (req, res) => {
   } catch (error) {
     logger.error("FILE", `Failed to get drives: ${error.message}`);
     res.status(500).send(error.message);
+  }
+});
+
+server.get("/user-bgv-list", async (req, res) => {
+  try {
+    if (!fs.existsSync(userBGVDir)) return res.json([]);
+
+    const files = await fs.promises.readdir(userBGVDir);
+    const videoExts = [".mp4", ".mkv", ".webm", ".avi", ".mov"];
+
+    const videos = files
+      .filter((f) => videoExts.includes(path.extname(f).toLowerCase()))
+      .map((f) => path.join(userBGVDir, f));
+
+    res.json(videos);
+  } catch (error) {
+    logger.error("FILE", `Failed to read User BGVs: ${error.message}`);
+    res.status(500).json({ error: error.message });
   }
 });
 
