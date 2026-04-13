@@ -184,6 +184,7 @@ class EncoreController {
 
     this.songList = this.FsSvc.getSongList();
     this.songMap = new Map(this.songList.map((s) => [s.code, s]));
+    this.buildSearchIndex();
     this.socket.emit("broadcastData", {
       type: "ready",
     });
@@ -518,6 +519,7 @@ class EncoreController {
       .classOn("main-content")
       .appendTo(this.dom.overlay);
     new Html("h1").text("Enter Song Number").appendTo(this.dom.mainContent);
+    new Html("br").appendTo(this.dom.mainContent);
     this.dom.numberDisplay = new Html("div")
       .classOn("number-display")
       .appendTo(this.dom.mainContent);
@@ -1033,6 +1035,7 @@ class EncoreController {
       this.dom.songArtist.text("");
       return;
     }
+
     this.dom.standbyScreen.classOn("hidden");
     this.dom.mainContent.classOff("hidden");
     this.dom.songListContainer.classOff("hidden");
@@ -1040,6 +1043,7 @@ class EncoreController {
     this.wrapper[this.state.isTypingNumber ? "classOn" : "classOff"](
       "is-typing",
     );
+
     const code = this.state.songNumber.padStart(5, "0");
     let activeSong =
       this.state.songNumber.length > 0
@@ -1056,13 +1060,36 @@ class EncoreController {
           : "",
     );
     this.dom.numberDisplay[activeSong ? "classOn" : "classOff"]("active");
-    this.dom.songTitle.text(
-      activeSong
-        ? activeSong.title
-        : this.state.songNumber.length === 5
-          ? "Song Not Found"
-          : "",
-    );
+
+    this.dom.songTitle.clear();
+
+    if (activeSong) {
+      const fmt = this.getFormatInfo(activeSong);
+
+      new Html("span")
+        .classOn("format-badge")
+        .text(fmt.label)
+        .styleJs({
+          backgroundColor: fmt.color,
+          fontSize: "0.5em",
+          fontFamily: "Rajdhani",
+          verticalAlign: "middle",
+          marginRight: "1rem",
+          transform: "translateY(-0.1rem)",
+          display: "inline-block",
+          paddingLeft: "0.5em",
+          paddingRight: "0.5em",
+        })
+        .appendTo(this.dom.songTitle);
+
+      new Html("span")
+        .text(activeSong.title)
+        .styleJs({ verticalAlign: "middle" })
+        .appendTo(this.dom.songTitle);
+    } else if (this.state.songNumber.length === 5) {
+      this.dom.songTitle.text("Song Not Found");
+    }
+
     this.dom.songArtist.text(activeSong ? activeSong.artist : "");
 
     this.songItemElements.forEach((item, index) => {
@@ -1108,6 +1135,71 @@ class EncoreController {
   }
 
   /**
+   * Builds a search index in the background to prevent lagging the UI during searches.
+   */
+  async buildSearchIndex() {
+    const asianRegex =
+      /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uac00-\ud7af]/;
+    console.log("[Encore] Building search index...");
+    for (let song of this.songList) {
+      if (asianRegex.test(song.title) && !song._romaTitle) {
+        song._romaTitle = await Romanizer.romanize(song.title);
+      }
+      if (asianRegex.test(song.artist) && !song._romaArtist) {
+        song._romaArtist = await Romanizer.romanize(song.artist);
+      }
+    }
+    console.log("[Encore] Search index complete.");
+  }
+
+  /**
+   * Calculates the quality of a match to rank results.
+   * Higher score = better match.
+   */
+  getMatchScore(text, query) {
+    if (!text || !query) return 0;
+    text = text.toLowerCase();
+
+    if (text === query) return 100;
+
+    if (text.startsWith(query)) return 90;
+    if (text.includes(" " + query)) return 80;
+    if (text.includes(query)) return 70;
+
+    const textWords = text.split(/\s+/);
+    const queryWords = query.trim().split(/\s+/);
+    if (queryWords.length > 1 && queryWords.length <= textWords.length) {
+      let isAcronymMatch = true;
+      for (let i = 0; i < queryWords.length; i++) {
+        if (!textWords[i].startsWith(queryWords[i])) {
+          isAcronymMatch = false;
+          break;
+        }
+      }
+      if (isAcronymMatch) return 60;
+    }
+
+    if (this.fuzzyMatch(text, query)) return 40;
+
+    return 0;
+  }
+
+  /**
+   * Subsequence string matcher for fuzzy searching
+   */
+  fuzzyMatch(text, query) {
+    if (!text || !query) return false;
+    let queryIdx = 0;
+    for (let i = 0; i < text.length; i++) {
+      if (text[i].toLowerCase() === query[queryIdx]) {
+        queryIdx++;
+      }
+      if (queryIdx === query.length) return true;
+    }
+    return false;
+  }
+
+  /**
    * Queries both local indexing and YouTube APIs to render a blended set of results.
    *
    * @returns {Promise<void>}
@@ -1122,45 +1214,48 @@ class EncoreController {
     this.state.isSearching = true;
 
     let localResults = [];
-    if (/^\d+$/.test(query))
-      this.songList.forEach((s) => {
-        if (s.code.includes(query)) localResults.push({ ...s, type: "local" });
-      });
+    const isNumeric = /^\d+$/.test(query);
 
     for (const s of this.songList) {
-      if (localResults.find((x) => x.code === s.code)) continue;
+      let score = 0;
 
-      const titleMatch = s.title.toLowerCase().includes(query);
-      const artistMatch = s.artist.toLowerCase().includes(query);
-
-      let romaTitle = null;
-      let romaArtist = null;
-
-      if (
-        !titleMatch &&
-        /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uac00-\ud7af]/.test(
-          s.title,
-        )
-      ) {
-        romaTitle = await Romanizer.romanize(s.title);
-      }
-      if (
-        !artistMatch &&
-        /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uac00-\ud7af]/.test(
-          s.artist,
-        )
-      ) {
-        romaArtist = await Romanizer.romanize(s.artist);
+      if (isNumeric) {
+        if (s.code === query) score += 1000;
+        else if (s.code.includes(query)) score += 500;
       }
 
-      const romaMatch =
-        (romaTitle && romaTitle.toLowerCase().includes(query)) ||
-        (romaArtist && romaArtist.toLowerCase().includes(query));
+      const titleScore = Math.max(
+        this.getMatchScore(s.title, query),
+        this.getMatchScore(s._romaTitle, query),
+      );
 
-      if (titleMatch || artistMatch || romaMatch) {
-        localResults.push({ ...s, type: "local" });
+      const artistScore = Math.max(
+        this.getMatchScore(s.artist, query),
+        this.getMatchScore(s._romaArtist, query),
+      );
+
+      if (titleScore > 0) score += titleScore + 10;
+      if (artistScore > 0) score += artistScore;
+
+      if (score > 0) {
+        localResults.push({
+          ...s,
+          type: "local",
+          score: score,
+          displayRomaTitle:
+            this.getMatchScore(s._romaTitle, query) > 0 ? s._romaTitle : null,
+          displayRomaArtist:
+            this.getMatchScore(s._romaArtist, query) > 0 ? s._romaArtist : null,
+        });
       }
     }
+
+    localResults.sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      return a.title.localeCompare(b.title);
+    });
+
+    localResults = localResults.slice(0, 75);
 
     this.state.searchResults = [...localResults];
     this.renderSearchResults();
@@ -1233,10 +1328,24 @@ class EncoreController {
 
         new Html("span").text(res.title).appendTo(titleRow);
 
-        new Html("div")
+        if (res.displayRomaTitle) {
+          new Html("span")
+            .text(` (${res.displayRomaTitle})`)
+            .styleJs({ color: "#aaa", fontSize: "0.9em", marginLeft: "0.5rem" })
+            .appendTo(titleRow);
+        }
+
+        const artistRow = new Html("div")
           .classOn("search-channel")
-          .text(res.artist)
           .appendTo(info);
+        new Html("span").text(res.artist).appendTo(artistRow);
+
+        if (res.displayRomaArtist) {
+          new Html("span")
+            .text(` (${res.displayRomaArtist})`)
+            .styleJs({ color: "#aaa", fontSize: "0.9em", marginLeft: "0.5rem" })
+            .appendTo(artistRow);
+        }
       } else {
         const thumb = new Html("div")
           .classOn("search-thumbnail-wrapper")

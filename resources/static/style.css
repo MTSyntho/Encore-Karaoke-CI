@@ -1806,6 +1806,12 @@ p + .flex-list button {
   padding: 1rem 2rem;
   letter-spacing: 0.5rem;
   transition: all 0.2s ease;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 500px;
+  height: 180px;
+  margin: 0 auto;
 }
 
 .number-display.active {
@@ -1816,7 +1822,11 @@ p + .flex-list button {
 
 .song-info {
   margin-top: 1.5rem;
-  height: 100px;
+  height: 120px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
 }
 
 .song-title {
