@@ -213,12 +213,6 @@ server.get("/yt-search", async (req, res) => {
   res.json(results);
 });
 
-server.get("/romanize", async (req, res) => {
-  res.send(
-    await kuroshiro.convert(req.query.t, { to: "romaji", mode: "spaced" }),
-  );
-});
-
 server.post("/auth/create-hash", (req, res) => {
   const { password } = req.body;
   if (!password) return res.status(400).json({ error: "Password required" });
