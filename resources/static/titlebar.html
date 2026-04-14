@@ -133,6 +133,7 @@
         background: transparent;
         border: 1px solid rgba(255, 255, 255, 0.1);
       }
+
       .stop-btn {
         color: #ff5555;
         font-size: 1rem;
@@ -140,6 +141,15 @@
         border-color: rgba(255, 85, 85, 0.2);
       }
       .stop-btn:hover {
+        background: rgba(255, 85, 85, 0.15);
+        border-color: #ff5555;
+        color: #ff2222;
+      }
+
+      .rec-btn {
+        color: #ff5555;
+      }
+      .rec-btn:hover {
         background: rgba(255, 85, 85, 0.15);
         border-color: #ff5555;
         color: #ff2222;
@@ -170,6 +180,7 @@
         <button onclick="sendKey(']')">BGV</button>
         <button onclick="sendKey('Y')">SEARCH</button>
         <button onclick="sendKey('M')">MIXER</button>
+        <button onclick="sendKey('R')" class="rec-btn">REC</button>
       </div>
 
       <div class="lcd-display">
