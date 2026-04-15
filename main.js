@@ -520,6 +520,57 @@ app.whenReady().then(() => {
     return romaji;
   });
   ipcMain.on("set-volume", async (event, vol) => setVolume(vol));
+  ipcMain.handle("get-recordings", async () => {
+    const recordingsDir = path.join(userVideos, "Encore Recordings");
+    try {
+      if (!fs.existsSync(recordingsDir)) return [];
+      const items = await fs.promises.readdir(recordingsDir, {
+        withFileTypes: true,
+      });
+      const recordings = [];
+
+      for (const item of items) {
+        if (item.isDirectory()) {
+          const sessionPath = path.join(recordingsDir, item.name);
+          const videoPath = path.join(sessionPath, "Mix-Video.webm");
+
+          if (fs.existsSync(videoPath)) {
+            const stat = await fs.promises.stat(videoPath);
+            recordings.push({
+              id: item.name,
+              title: item.name,
+              date: stat.mtimeMs,
+              videoPath: videoPath,
+            });
+          }
+        }
+      }
+      return recordings.sort((a, b) => b.date - a.date); // Newest first
+    } catch (error) {
+      logger.error("SYSTEM", `Failed to get recordings: ${error.message}`);
+      return [];
+    }
+  });
+
+  ipcMain.handle("delete-recording", async (event, dirName) => {
+    if (
+      !dirName ||
+      dirName.includes("..") ||
+      dirName.includes("/") ||
+      dirName.includes("\\")
+    ) {
+      return false;
+    }
+    const targetPath = path.join(userVideos, "Encore Recordings", dirName);
+    try {
+      await fs.promises.rm(targetPath, { recursive: true, force: true });
+      logger.info("SYSTEM", `Recording session deleted: ${dirName}`);
+      return true;
+    } catch (error) {
+      logger.error("SYSTEM", `Failed to delete recording: ${error.message}`);
+      return false;
+    }
+  });
   ipcMain.handle("save-recording", async (event, data) => {
     try {
       const { videoBuffer, micBuffer, musicBuffer, songTitle } = data;

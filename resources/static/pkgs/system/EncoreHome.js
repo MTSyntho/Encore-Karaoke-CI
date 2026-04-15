@@ -104,6 +104,12 @@ class EncoreController {
       activeCheerCount: 0,
       activeCheers: [],
       isPromptingSetup: false,
+      isRecordingsOpen: false,
+      isPlayingRecording: false,
+      isDeletePromptOpen: false,
+      pendingDeleteRec: null,
+      recordingsData: [],
+      highlightedRecordingIndex: 0,
     };
 
     console.log("[Encore] Enable fanfare?", this.state.isScoreFanfareEnabled);
@@ -624,8 +630,8 @@ class EncoreController {
       .appendTo(this.dom.bottomActions);
     new Html("div")
       .classOn("action-button")
-      .text("Calibrate Audio (C)")
-      .on("click", () => this.runCalibrationSequence())
+      .text("Recordings (R)")
+      .on("click", () => this.toggleRecordingsList())
       .appendTo(this.dom.bottomActions);
     new Html("div")
       .classOn("action-button")
@@ -634,7 +640,6 @@ class EncoreController {
       .appendTo(this.dom.bottomActions);
 
     this.buildQR();
-
     const vi = this.versionInformation || {
       channel: "",
       number: "",
@@ -719,6 +724,8 @@ class EncoreController {
     this.dom.midiLineDisplay2 = new Html("div")
       .classOn("lyric-line", "midi-lyric-line", "next")
       .appendTo(this.dom.midiContainer);
+
+    this.buildRecordingsUI();
   }
 
   /**
@@ -750,6 +757,256 @@ class EncoreController {
       .classOn("score-skip-hint")
       .text("PRESS ENTER TO CONTINUE")
       .appendTo(this.dom.postSongScreen);
+  }
+
+  /**
+   * Generates the UI elements for the Recordings List, Custom Player, and Delete Prompt.
+   */
+  buildRecordingsUI() {
+    this.dom.recordingsScreen = new Html("div")
+      .classOn("recordings-modal", "hidden")
+      .appendTo(this.wrapper);
+
+    const recContent = new Html("div")
+      .classOn("recordings-content")
+      .appendTo(this.dom.recordingsScreen);
+
+    const recHeader = new Html("div")
+      .classOn("recordings-header")
+      .appendTo(recContent);
+
+    new Html("h1").text("RECORDING SESSIONS").appendTo(recHeader);
+    new Html("div")
+      .classOn("rec-key-hint")
+      .html(
+        "<kbd>ESC</kbd> Close &nbsp;&nbsp; <kbd>DEL</kbd> Delete &nbsp;&nbsp; <kbd>ENTER</kbd> Play",
+      )
+      .appendTo(recHeader);
+
+    this.dom.recordingsList = new Html("div")
+      .classOn("recordings-list")
+      .appendTo(recContent);
+
+    this.dom.recDeleteOverlay = new Html("div")
+      .classOn("rec-delete-overlay", "hidden")
+      .appendTo(this.dom.recordingsScreen);
+
+    const deleteBox = new Html("div")
+      .classOn("rec-delete-box")
+      .appendTo(this.dom.recDeleteOverlay);
+    new Html("h2").text("DELETE RECORDING?").appendTo(deleteBox);
+    this.dom.recDeleteText = new Html("p").appendTo(deleteBox);
+    new Html("div")
+      .classOn("rec-key-hint")
+      .html("<kbd>ENTER</kbd> Confirm &nbsp;&nbsp; <kbd>ESC</kbd> Cancel")
+      .appendTo(deleteBox);
+
+    this.dom.recPlayerOverlay = new Html("div")
+      .classOn("rec-player-overlay", "hidden")
+      .appendTo(this.wrapper);
+
+    this.dom.recVideoPlayer = new Html("video")
+      .classOn("rec-video-element")
+      .appendTo(this.dom.recPlayerOverlay);
+
+    this.dom.recVideoOsd = new Html("div")
+      .classOn("rec-video-osd")
+      .appendTo(this.dom.recPlayerOverlay);
+
+    this.dom.recVideoTitle = new Html("div")
+      .classOn("rec-video-title")
+      .appendTo(this.dom.recVideoOsd);
+
+    const progressWrapper = new Html("div")
+      .classOn("rec-progress-wrapper")
+      .appendTo(this.dom.recVideoOsd);
+    const progressBar = new Html("div")
+      .classOn("rec-progress-bar")
+      .appendTo(progressWrapper);
+    this.dom.recVideoProgressFill = new Html("div")
+      .classOn("rec-progress-fill")
+      .appendTo(progressBar);
+
+    const osdBottom = new Html("div")
+      .classOn("rec-osd-bottom")
+      .appendTo(this.dom.recVideoOsd);
+    this.dom.recVideoTime = new Html("div")
+      .classOn("rec-video-time")
+      .text("00:00 / 00:00")
+      .appendTo(osdBottom);
+    new Html("div")
+      .classOn("rec-key-hint")
+      .html(
+        "<kbd>SPACE</kbd> Play/Pause &nbsp;&nbsp; <kbd>←</kbd> <kbd>→</kbd> Seek &nbsp;&nbsp; <kbd>-</kbd> <kbd>=</kbd> Vol &nbsp;&nbsp; <kbd>ESC</kbd> Stop",
+      )
+      .appendTo(osdBottom);
+
+    this.dom.recVideoPlayer.on("timeupdate", () => {
+      const curr = this.dom.recVideoPlayer.elm.currentTime;
+      const tot = this.dom.recVideoPlayer.elm.duration || 1;
+      this.dom.recVideoProgressFill.styleJs({
+        width: `${(curr / tot) * 100}%`,
+      });
+      this.dom.recVideoTime.text(
+        `${this.formatTime(curr)} / ${this.formatTime(tot)}`,
+      );
+    });
+
+    this.dom.recVideoPlayer.on("ended", () => this.closeRecordingPlayer());
+  }
+
+  formatTime(seconds) {
+    if (isNaN(seconds)) return "00:00";
+    const m = Math.floor(seconds / 60)
+      .toString()
+      .padStart(2, "0");
+    const s = Math.floor(seconds % 60)
+      .toString()
+      .padStart(2, "0");
+    return `${m}:${s}`;
+  }
+
+  triggerRecOsd() {
+    this.dom.recVideoOsd.classOff("hidden");
+    if (this.recOsdTimeout) clearTimeout(this.recOsdTimeout);
+    this.recOsdTimeout = setTimeout(() => {
+      if (!this.dom.recVideoPlayer.elm.paused) {
+        this.dom.recVideoOsd.classOn("hidden");
+      }
+    }, 3500);
+  }
+
+  async toggleRecordingsList(forceShow = null) {
+    if (this.state.isTransitioning) return;
+    const isOpening =
+      forceShow !== null
+        ? forceShow
+        : this.dom.recordingsScreen.elm.classList.contains("hidden");
+
+    if (isOpening) {
+      this.state.isRecordingsOpen = true;
+      this.dom.recordingsScreen.classOff("hidden");
+      this.state.highlightedRecordingIndex = 0;
+      await this.refreshRecordingsList();
+    } else {
+      this.state.isRecordingsOpen = false;
+      this.dom.recordingsScreen.classOn("hidden");
+      this.closeRecordingPlayer();
+      this.cancelDeletePrompt();
+    }
+  }
+
+  async refreshRecordingsList() {
+    this.dom.recordingsList.clear();
+    this.state.recordingsData = [];
+
+    try {
+      const recordings =
+        await window.desktopIntegration.ipc.invoke("get-recordings");
+      if (!recordings || recordings.length === 0) {
+        new Html("div")
+          .classOn("rec-empty-state")
+          .text("No recordings found. Go sing a song and capture the moment!")
+          .appendTo(this.dom.recordingsList);
+        return;
+      }
+
+      this.state.recordingsData = recordings;
+
+      this.state.recordingsData.forEach((rec) => {
+        const item = new Html("div")
+          .classOn("rec-item")
+          .appendTo(this.dom.recordingsList);
+        const displayTitle =
+          rec.title.split("-").slice(0, -3).join("-") || rec.title;
+
+        new Html("div").classOn("rec-title").text(displayTitle).appendTo(item);
+        new Html("div")
+          .classOn("rec-date")
+          .text(new Date(rec.date).toLocaleString())
+          .appendTo(item);
+      });
+
+      this.updateRecordingsHighlight();
+    } catch (e) {
+      new Html("div")
+        .classOn("rec-empty-state")
+        .text("Failed to load recordings.")
+        .appendTo(this.dom.recordingsList);
+    }
+  }
+
+  updateRecordingsHighlight() {
+    const items = this.dom.recordingsList.qsa(".rec-item");
+    if (!items) return;
+
+    items.forEach((item, idx) => {
+      const isHi = idx === this.state.highlightedRecordingIndex;
+      item[isHi ? "classOn" : "classOff"]("active");
+      if (isHi)
+        item.elm.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    });
+  }
+
+  playRecording(rec) {
+    this.state.isPlayingRecording = true;
+    const videoUrl = new URL("http://127.0.0.1:9864/getFile");
+    videoUrl.searchParams.append("path", rec.videoPath);
+
+    const displayTitle =
+      rec.title.split("-").slice(0, -3).join("-") || rec.title;
+    this.dom.recVideoTitle.text(displayTitle);
+
+    this.dom.recVideoPlayer.elm.volume = this.state.volume;
+
+    this.dom.recVideoPlayer.attr({ src: videoUrl.href });
+    this.dom.recPlayerOverlay.classOff("hidden");
+    this.dom.recVideoPlayer.elm.play();
+    this.triggerRecOsd();
+  }
+
+  closeRecordingPlayer() {
+    this.state.isPlayingRecording = false;
+    this.dom.recVideoPlayer.elm.pause();
+    this.dom.recVideoPlayer.attr({ src: "" });
+    this.dom.recPlayerOverlay.classOn("hidden");
+    if (this.recOsdTimeout) clearTimeout(this.recOsdTimeout);
+  }
+
+  openDeletePrompt(rec) {
+    const displayTitle =
+      rec.title.split("-").slice(0, -3).join("-") || rec.title;
+    this.state.pendingDeleteRec = rec;
+    this.state.isDeletePromptOpen = true;
+    this.dom.recDeleteText.text(
+      `Are you sure you want to permanently delete "${displayTitle}"?`,
+    );
+    this.dom.recDeleteOverlay.classOff("hidden");
+  }
+
+  cancelDeletePrompt() {
+    this.state.isDeletePromptOpen = false;
+    this.state.pendingDeleteRec = null;
+    this.dom.recDeleteOverlay.classOn("hidden");
+  }
+
+  async confirmDeleteRecording() {
+    if (!this.state.pendingDeleteRec) return;
+    const success = await window.desktopIntegration.ipc.invoke(
+      "delete-recording",
+      this.state.pendingDeleteRec.id,
+    );
+    if (success) {
+      this.infoBar.showTemp("DELETED", "Recording session removed.", 3000);
+      this.state.highlightedRecordingIndex = Math.max(
+        0,
+        this.state.highlightedRecordingIndex - 1,
+      );
+      await this.refreshRecordingsList();
+    } else {
+      this.infoBar.showTemp("ERROR", "Failed to delete recording.", 3000);
+    }
+    this.cancelDeletePrompt();
   }
 
   /**
@@ -2663,6 +2920,67 @@ class EncoreController {
       return;
     }
 
+    if (this.state.isDeletePromptOpen) {
+      e.preventDefault();
+      if (e.key === "Escape") this.cancelDeletePrompt();
+      else if (e.key === "Enter") this.confirmDeleteRecording();
+      return;
+    }
+
+    if (this.state.isPlayingRecording) {
+      e.preventDefault();
+      this.triggerRecOsd();
+
+      if (e.key === "Escape" || e.key === "Backspace") {
+        this.closeRecordingPlayer();
+      } else if (e.key === " " || e.key === "Enter") {
+        const v = this.dom.recVideoPlayer.elm;
+        v.paused ? v.play() : v.pause();
+      } else if (e.key === "ArrowLeft") {
+        this.dom.recVideoPlayer.elm.currentTime = Math.max(
+          0,
+          this.dom.recVideoPlayer.elm.currentTime - 5,
+        );
+      } else if (e.key === "ArrowRight") {
+        this.dom.recVideoPlayer.elm.currentTime += 5;
+      } else if (e.key === "-" || e.key === "_") {
+        this.handleVolume("down");
+        this.dom.recVideoPlayer.elm.volume = this.state.volume;
+      } else if (e.key === "=" || e.key === "+") {
+        this.handleVolume("up");
+        this.dom.recVideoPlayer.elm.volume = this.state.volume;
+      }
+      return;
+    }
+
+    if (this.state.isRecordingsOpen) {
+      e.preventDefault();
+      if (e.key === "Escape" || e.key === "Backspace") {
+        this.toggleRecordingsList(false);
+      } else if (e.key === "ArrowUp") {
+        this.state.highlightedRecordingIndex = Math.max(
+          0,
+          this.state.highlightedRecordingIndex - 1,
+        );
+        this.updateRecordingsHighlight();
+      } else if (e.key === "ArrowDown") {
+        this.state.highlightedRecordingIndex = Math.min(
+          this.state.recordingsData.length - 1,
+          this.state.highlightedRecordingIndex + 1,
+        );
+        this.updateRecordingsHighlight();
+      } else if (e.key === "Enter") {
+        const rec =
+          this.state.recordingsData[this.state.highlightedRecordingIndex];
+        if (rec) this.playRecording(rec);
+      } else if (e.key === "Delete") {
+        const rec =
+          this.state.recordingsData[this.state.highlightedRecordingIndex];
+        if (rec) this.openDeletePrompt(rec);
+      }
+      return;
+    }
+
     if (this.state.isYtSkipWarningActive && e.key === "ArrowUp") {
       e.preventDefault();
       this.extendYoutubeSkip();
@@ -2735,9 +3053,13 @@ class EncoreController {
       this.mixer.toggle();
       return;
     }
+
     if (e.key.toLowerCase() === "r") {
-      if (this.state.mode === "player" && !this.state.currentSongIsYouTube)
+      if (this.state.mode === "player" && !this.state.currentSongIsYouTube) {
         this.recorder.toggle();
+      } else if (this.state.mode === "menu") {
+        this.toggleRecordingsList();
+      }
       return;
     }
 
@@ -2753,8 +3075,6 @@ class EncoreController {
     else if (e.key === "=") this.handleVolume("up");
     else if (e.key === "[" || e.key === "]") this.handleBracket(e.key);
     else if (e.key.toLowerCase() === "y") this.handleYKey();
-    else if (e.key.toLowerCase() === "c" && this.state.mode === "menu")
-      this.runCalibrationSequence();
   }
 
   /**
