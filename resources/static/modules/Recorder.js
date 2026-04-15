@@ -1,18 +1,121 @@
 import Html from "/libs/html.js";
 
 /**
- * RecorderModule - Handles video recording of karaoke performances inside Encore with real-time UI overlay.
+ * Utility function to encode an AudioBuffer into a standard 16-bit PCM WAV ArrayBuffer.
+ *
+ * @param {AudioBuffer} audioBuffer - The decoded audio data.
+ * @returns {Promise<ArrayBuffer>} The formatted WAV file as an ArrayBuffer.
+ */
+async function audioBufferToWavBuffer(audioBuffer) {
+  const numChannels = audioBuffer.numberOfChannels;
+  const sampleRate = audioBuffer.sampleRate;
+  const format = 1; // PCM
+  const bitDepth = 16;
+  const bytesPerSample = bitDepth / 8;
+  const blockAlign = numChannels * bytesPerSample;
+  const byteRate = sampleRate * blockAlign;
+  const dataSize = audioBuffer.length * blockAlign;
+
+  const arrayBuffer = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(arrayBuffer);
+
+  const writeString = (view, offset, string) => {
+    for (let i = 0; i < string.length; i++) {
+      view.setUint8(offset + i, string.charCodeAt(i));
+    }
+  };
+
+  // Write standard WAV Header
+  writeString(view, 0, "RIFF");
+  view.setUint32(4, 36 + dataSize, true);
+  writeString(view, 8, "WAVE");
+  writeString(view, 12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, format, true);
+  view.setUint16(22, numChannels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, byteRate, true);
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, bitDepth, true);
+  writeString(view, 36, "data");
+  view.setUint32(40, dataSize, true);
+
+  // Fast write for PCM Data mapping using Int16Array (Native Little Endian)
+  const offset = 44;
+  const int16View = new Int16Array(arrayBuffer, offset);
+
+  if (numChannels === 2) {
+    const left = audioBuffer.getChannelData(0);
+    const right = audioBuffer.getChannelData(1);
+    for (let i = 0, j = 0; i < audioBuffer.length; i++, j += 2) {
+      let sL = Math.max(-1, Math.min(1, left[i]));
+      let sR = Math.max(-1, Math.min(1, right[i]));
+      int16View[j] = sL < 0 ? sL * 0x8000 : sL * 0x7fff;
+      int16View[j + 1] = sR < 0 ? sR * 0x8000 : sR * 0x7fff;
+    }
+  } else {
+    const channel = audioBuffer.getChannelData(0);
+    for (let i = 0, j = 0; i < audioBuffer.length; i++, j++) {
+      let sample = Math.max(-1, Math.min(1, channel[i]));
+      int16View[j] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
+    }
+  }
+
+  return arrayBuffer;
+}
+
+/**
+ * Helper to process a recorded Blob (e.g., webm/opus) into a standard WAV array buffer.
+ * It uses the browser's native AudioContext to decode the compressed audio.
+ *
+ * @param {Blob} blob - The recorded compressed audio blob.
+ * @returns {Promise<ArrayBuffer|null>} The WAV ArrayBuffer, or null if empty/failed.
+ */
+async function processAudioBlobToWav(blob) {
+  try {
+    const arrayBuffer = await blob.arrayBuffer();
+    if (arrayBuffer.byteLength === 0) return null;
+
+    const actx = new (window.AudioContext || window.webkitAudioContext)();
+    const audioBuffer = await actx.decodeAudioData(arrayBuffer);
+    const wavBuffer = await audioBufferToWavBuffer(audioBuffer);
+    await actx.close();
+
+    return wavBuffer;
+  } catch (e) {
+    console.warn("[RECORDER] Audio decoding skipped for empty/invalid stem", e);
+    return null;
+  }
+}
+
+/**
+ * RecorderModule - Handles video recording of karaoke performances inside Encore
+ * with real-time UI overlay and multi-track audio stem exporting.
  * @class
  */
 export class RecorderModule {
+  /**
+   * @param {Object} forteSvc - The Forte Sound Engine Service.
+   * @param {Object} bgvModule - The Background Video Player module.
+   * @param {Object} infoBarModule - The UI Info bar module for notifications.
+   * @param {Function} dialogShow - Function to trigger on-screen text dialogs.
+   */
   constructor(forteSvc, bgvModule, infoBarModule, dialogShow) {
     this.forteSvc = forteSvc;
     this.bgvPlayer = bgvModule;
     this.infoBar = infoBarModule;
     this.dialogShow = dialogShow;
+
     this.isRecording = false;
+
     this.mediaRecorder = null;
+    this.micRecorder = null;
+    this.musicRecorder = null;
+
     this.recordedChunks = [];
+    this.micChunks = [];
+    this.musicChunks = [];
+
     this.recordingStartTime = 0;
     this.recordingInterval = null;
     this.animationFrameId = null;
@@ -22,26 +125,22 @@ export class RecorderModule {
     this.currentStream = null;
     this.outputResolution = { width: 1280, height: 720 };
 
-    // Canvas & Contexts
     this.canvas = null;
     this.ctx = null;
     this.offscreenCanvas = null;
     this.oCtx = null;
 
-    // Optimization Caches & Interpolation States
     this.lyricCaches = new WeakMap();
     this.metaCanvas = null;
     this.bgvCanvas = null;
     this.bgvCtx = null;
 
-    // Pre-rendered gradients
     this.lyricGradient = null;
     this.countdownGradient = null;
 
     this.bgvCurrentOpacity = 1.0;
     this.lyricOpacity = 1.0;
 
-    // Throttle DOM checks
     this.frameCounter = 0;
     this.isInterludeVisible = false;
     this.cachedInterludeTip = "";
@@ -51,6 +150,7 @@ export class RecorderModule {
 
   /**
    * Calculates formatted elapsed recording time (MM:SS)
+   * @returns {string} Formatted time string.
    */
   getRecordingTimeString() {
     if (!this.isRecording) return "00:00";
@@ -64,7 +164,7 @@ export class RecorderModule {
 
   /**
    * Mounts the recorder module to a DOM container.
-   * @param {HTMLElement} container - The parent DOM container for canvas elements
+   * @param {HTMLElement} container - The parent DOM container for canvas elements.
    */
   mount(container) {
     this.parentContainer = container;
@@ -141,7 +241,7 @@ export class RecorderModule {
 
   /**
    * Sets references to UI elements for rendering.
-   * @param {Object} refs - Object containing UI element references
+   * @param {Object} refs - Object containing UI element references.
    */
   setUiRefs(refs) {
     this.uiRefs = refs;
@@ -149,7 +249,7 @@ export class RecorderModule {
 
   /**
    * Sets the current song information and pre-renders metadata.
-   * @param {Object} song - Song object with title and artist properties
+   * @param {Object} song - Song object with title and artist properties.
    */
   setSongInfo(song) {
     if (song) {
@@ -174,8 +274,8 @@ export class RecorderModule {
   }
 
   /**
-   * Starts video recording with audio and video streams.
-   * Initializes canvas, media recorder, and begins frame rendering.
+   * Starts video recording along with multi-track audio mapping.
+   * Initializes canvas, media recorders, and begins frame rendering.
    */
   start() {
     if (this.isRecording || !this.forteSvc || !this.bgvPlayer) return;
@@ -185,19 +285,17 @@ export class RecorderModule {
     this.lyricOpacity = 1.0;
     this.frameCounter = 0;
 
-    let audioStream;
+    let mixAudioStream, micAudioStream, musicAudioStream;
     try {
-      audioStream = this.forteSvc.getRecordingAudioStream();
-      if (!audioStream || audioStream.getAudioTracks().length === 0) {
-        this.infoBar.showTemp(
-          "RECORDING",
-          "Error: No audio stream found.",
-          4000,
-        );
-        return;
+      mixAudioStream = this.forteSvc.getRecordingAudioStream();
+      micAudioStream = this.forteSvc.getMicAudioStream();
+      musicAudioStream = this.forteSvc.getMusicAudioStream();
+
+      if (!mixAudioStream || mixAudioStream.getAudioTracks().length === 0) {
+        throw new Error("No primary audio stream found.");
       }
     } catch (e) {
-      this.infoBar.showTemp("RECORDING", e, 4000);
+      this.infoBar.showTemp("RECORDING", `Error: ${e.message}`, 4000);
       this.dialogShow(
         new Html("div").classOn("temp-dialog-text").text("NOT AVAILABLE"),
         2000,
@@ -209,70 +307,128 @@ export class RecorderModule {
 
     this.currentStream = new MediaStream([
       videoStream.getVideoTracks()[0],
-      audioStream.getAudioTracks()[0],
+      mixAudioStream.getAudioTracks()[0],
     ]);
 
     this.recordedChunks = [];
+    this.micChunks = [];
+    this.musicChunks = [];
+
     try {
-      const mimeOptions = [
+      const videoMimes = [
         "video/webm; codecs=h264,opus",
         "video/webm; codecs=h264",
         "video/webm; codecs=vp8,opus",
-        "video/webm; codecs=vp8",
         "video/webm",
       ];
-      const selectedMime =
-        mimeOptions.find((mime) => MediaRecorder.isTypeSupported(mime)) || "";
+      const selectedVideoMime =
+        videoMimes.find((mime) => MediaRecorder.isTypeSupported(mime)) || "";
 
       this.mediaRecorder = new MediaRecorder(this.currentStream, {
-        mimeType: selectedMime,
+        mimeType: selectedVideoMime,
         videoBitsPerSecond: 2500000,
       });
+
+      const audioMimes = ["audio/webm; codecs=opus", "audio/webm", "audio/ogg"];
+      const selectedAudioMime =
+        audioMimes.find((mime) => MediaRecorder.isTypeSupported(mime)) || "";
+
+      this.micRecorder = new MediaRecorder(micAudioStream, {
+        mimeType: selectedAudioMime,
+      });
+      this.musicRecorder = new MediaRecorder(musicAudioStream, {
+        mimeType: selectedAudioMime,
+      });
+
       this.dialogShow(
         new Html("div").classOn("temp-dialog-text").text("RECORD STARTED"),
         2000,
       );
     } catch (e) {
-      console.error("Failed to create MediaRecorder:", e);
+      console.error("Failed to create MediaRecorders:", e);
       this.infoBar.showTemp(
         "RECORDING",
-        "Error: Could not start recorder.",
+        "Error: Could not start recorders.",
         4000,
       );
       return;
     }
 
-    this.mediaRecorder.ondataavailable = (event) => {
-      if (event.data.size > 0) this.recordedChunks.push(event.data);
+    this.mediaRecorder.ondataavailable = (e) => {
+      if (e.data.size > 0) this.recordedChunks.push(e.data);
+    };
+    this.micRecorder.ondataavailable = (e) => {
+      if (e.data.size > 0) this.micChunks.push(e.data);
+    };
+    this.musicRecorder.ondataavailable = (e) => {
+      if (e.data.size > 0) this.musicChunks.push(e.data);
     };
 
-    this.mediaRecorder.onstop = async () => {
-      const blob = new Blob(this.recordedChunks, { type: "video/webm" });
-      this.recordedChunks = [];
+    const mixMime = this.mediaRecorder.mimeType;
+    const micMime = this.micRecorder.mimeType;
+    const musicMime = this.musicRecorder.mimeType;
 
-      this.infoBar.showTemp("RECORDING", "Saving to Videos folder...", 3000);
+    const mixPromise = new Promise((resolve) => {
+      this.mediaRecorder.onstop = () =>
+        resolve(new Blob(this.recordedChunks, { type: mixMime }));
+    });
+    const micPromise = new Promise((resolve) => {
+      this.micRecorder.onstop = () =>
+        resolve(new Blob(this.micChunks, { type: micMime }));
+    });
+    const musicPromise = new Promise((resolve) => {
+      this.musicRecorder.onstop = () =>
+        resolve(new Blob(this.musicChunks, { type: musicMime }));
+    });
 
-      try {
-        const arrayBuffer = await blob.arrayBuffer();
-        const result = await window.desktopIntegration.ipc.invoke(
-          "save-recording",
-          arrayBuffer,
+    Promise.all([mixPromise, micPromise, musicPromise]).then(
+      async ([mixBlob, micBlob, musicBlob]) => {
+        this.infoBar.showTemp(
+          "RECORDING",
+          "Processing audio stems and saving...",
+          60000,
         );
 
-        if (result.success) {
+        try {
+          const mixVideoBuffer = await mixBlob.arrayBuffer();
+          const micWavBuffer = await processAudioBlobToWav(micBlob);
+          const musicWavBuffer = await processAudioBlobToWav(musicBlob);
+
+          const songTitle = this.currentSongInfo?.title || "Unknown";
+
+          const result = await window.desktopIntegration.ipc.invoke(
+            "save-recording",
+            {
+              videoBuffer: mixVideoBuffer,
+              micBuffer: micWavBuffer,
+              musicBuffer: musicWavBuffer,
+              songTitle,
+            },
+          );
+
+          if (result.success) {
+            this.infoBar.showTemp(
+              "RECORDING",
+              "Saved session to Encore Recordings!",
+              5000,
+            );
+          } else {
+            this.infoBar.showTemp(
+              "RECORDING",
+              "Failed to save recording.",
+              5000,
+            );
+          }
+        } catch (e) {
+          console.error("Save error:", e);
           this.infoBar.showTemp(
             "RECORDING",
-            "Saved to Encore Recordings!",
+            "Failed to process audio stems.",
             5000,
           );
-        } else {
-          this.infoBar.showTemp("RECORDING", "Failed to save recording.", 5000);
         }
-      } catch (e) {
-        console.error("Save error:", e);
-        this.infoBar.showTemp("RECORDING", "Failed to save recording.", 5000);
-      }
-    };
+      },
+    );
 
     this.recordingStartTime = Date.now();
     if (this.recordingInterval) clearInterval(this.recordingInterval);
@@ -281,18 +437,26 @@ export class RecorderModule {
     }, 1000);
 
     this.mediaRecorder.start();
+    this.micRecorder.start();
+    this.musicRecorder.start();
+
     this.isRecording = true;
     this.drawFrame();
     this.infoBar.showDefault();
   }
 
   /**
-   * Stops recording and triggers file download.
+   * Stops all active recordings, triggering the encoding and export pipeline.
    */
   stop() {
     if (!this.isRecording || !this.mediaRecorder) return;
 
     this.mediaRecorder.stop();
+    if (this.micRecorder && this.micRecorder.state !== "inactive")
+      this.micRecorder.stop();
+    if (this.musicRecorder && this.musicRecorder.state !== "inactive")
+      this.musicRecorder.stop();
+
     this.isRecording = false;
 
     if (this.recordingInterval) {
@@ -313,6 +477,9 @@ export class RecorderModule {
     }
 
     this.mediaRecorder = null;
+    this.micRecorder = null;
+    this.musicRecorder = null;
+
     this.infoBar.showDefault();
     this.dialogShow(
       new Html("div").classOn("temp-dialog-text").text("RECORD STOPPED"),

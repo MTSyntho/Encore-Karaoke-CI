@@ -520,23 +520,55 @@ app.whenReady().then(() => {
     return romaji;
   });
   ipcMain.on("set-volume", async (event, vol) => setVolume(vol));
-  ipcMain.handle("save-recording", async (event, arrayBuffer) => {
+  ipcMain.handle("save-recording", async (event, data) => {
     try {
-      const buffer = Buffer.from(arrayBuffer);
+      const { videoBuffer, micBuffer, musicBuffer, songTitle } = data;
       const videosDir = path.join(userVideos, "Encore Recordings");
 
-      if (!fs.existsSync(videosDir)) {
-        fs.mkdirSync(videosDir, { recursive: true });
+      const safeTitle = (songTitle || "Session").replace(/[^a-z0-9]/gi, "_");
+      const timestamp = new Date().toISOString().replace(/:/g, "-");
+      const sessionFolderName = `${safeTitle}-${timestamp}`;
+      const sessionPath = path.join(videosDir, sessionFolderName);
+
+      if (!fs.existsSync(sessionPath)) {
+        fs.mkdirSync(sessionPath, { recursive: true });
       }
 
-      const filename = `Encore-Recording-${new Date().toISOString().replace(/:/g, "-")}.webm`;
-      const filePath = path.join(videosDir, filename);
+      const videoFile = path.join(sessionPath, "Mix-Video.webm");
+      const micFile = path.join(sessionPath, "Vocal-Track.wav");
+      const musicFile = path.join(sessionPath, "Instrumental-Track.wav");
 
-      await fs.promises.writeFile(filePath, buffer);
-      logger.info("SYSTEM", `Recording saved silently to: ${filePath}`);
-      return { success: true, path: filePath };
+      const writePromises = [];
+
+      if (videoBuffer) {
+        writePromises.push(
+          fs.promises.writeFile(videoFile, Buffer.from(videoBuffer)),
+        );
+      }
+
+      if (micBuffer) {
+        writePromises.push(
+          fs.promises.writeFile(micFile, Buffer.from(micBuffer)),
+        );
+      }
+      if (musicBuffer) {
+        writePromises.push(
+          fs.promises.writeFile(musicFile, Buffer.from(musicBuffer)),
+        );
+      }
+
+      await Promise.all(writePromises);
+
+      logger.info(
+        "SYSTEM",
+        `Recording session exported silently to: ${sessionPath}`,
+      );
+      return { success: true, path: sessionPath };
     } catch (error) {
-      logger.error("SYSTEM", `Failed to save recording: ${error.message}`);
+      logger.error(
+        "SYSTEM",
+        `Failed to save recording session: ${error.message}`,
+      );
       return { success: false, error: error.message };
     }
   });
