@@ -1,8 +1,8 @@
 import {
   WorkletSynthesizer as Synthetizer,
   Sequencer,
-} from "https://cdn.jsdelivr.net/npm/spessasynth_lib@4.2.10/+esm";
-import { BasicMIDI } from "https://cdn.jsdelivr.net/npm/spessasynth_core@4.2.8/+esm";
+} from "https://cdn.jsdelivr.net/npm/spessasynth_lib@4.2.15/+esm";
+import { BasicMIDI } from "https://cdn.jsdelivr.net/npm/spessasynth_core@4.2.12/+esm";
 import Html from "/libs/html.js";
 import { PitchDetector } from "https://cdn.jsdelivr.net/npm/pitchy@4.1.0/+esm";
 
