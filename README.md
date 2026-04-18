@@ -3,7 +3,7 @@
 
 # Encore Karaoke Player
 
-**Experience the ultimate Asian-style KTV experience right on your computer! Bring the arcade and KTV lounge straight to your living room.**
+**Experience the ultimate Asian-style KTV experience right on your computer! Bring the arcade and KTV lounge straight to your living room, without buying an expensive machine!**
 
 </div>
 
@@ -78,8 +78,7 @@ Encore can be fully controlled via a standard keyboard, a connected USB Numpad, 
 | `Escape`       | Stop playback / Clear input / Go back                |
 | `Y`            | Open Search Menu (Local + YouTube)                   |
 | `M`            | Open Mixer (Adjust Mic & Music levels)               |
-| `R`            | Start/stop recording (during playback)               |
-| `C`            | Run automated latency calibration (in main menu)     |
+| `R`            | Toggle recording (during playback) / View recordings |
 | `- / =`        | Adjust volume                                        |
 | `Up / Down`    | Pitch shift (Transpose) up/down                      |
 | `Left / Right` | Multiplex Pan (Toggle guide vocal on/off)            |
