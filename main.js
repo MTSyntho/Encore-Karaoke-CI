@@ -59,6 +59,7 @@ const server = express();
 const serverHttp = http.createServer(server);
 const io = new Server(serverHttp);
 const instance = new Bonjour();
+const bonjourId = `encore-link-${crypto.randomUUID()}`;
 
 instance.find({ type: "encore-server" }, async (service) => {
   try {
@@ -746,7 +747,21 @@ app.whenReady().then(() => {
   });
 
   serverHttp.listen(PORT, () => {
-    logger.info("SERVER", `Encore Karaoke server running on port ${PORT}`);
+    let actualPort = serverHttp.address().port;
+    instance.publish({
+      name: bonjourId,
+      type: "enmoku",
+      port: actualPort,
+    });
+    instance.find({ type: "enmoku" }, async (service) => {
+      if (service.name == bonjourId) {
+        logger.info("LINK", "Encore Link is now discoverable");
+      }
+    });
+    logger.info(
+      "SERVER",
+      `Encore Karaoke server running on port ${actualPort}`,
+    );
     createWindow();
   });
 });
