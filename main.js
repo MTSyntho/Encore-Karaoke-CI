@@ -13,6 +13,7 @@ const crypto = require("crypto");
 const dgram = require("dgram");
 const { exec } = require("child_process");
 
+const Bonjour = require("bonjour-service").Bonjour;
 const express = require("express");
 const http = require("http");
 const cors = require("cors");
@@ -34,15 +35,13 @@ const Config = require("./config-manager");
 // Logging System
 const logger = {
   info: (tag, msg) =>
-    console.log(`[${new Date().toLocaleTimeString()}] [INFO] [${tag}] ${msg}`),
+    console.log(`[${new Date().toLocaleTimeString()}] [INFO] [${tag}]`, msg),
   warn: (tag, msg) =>
-    console.warn(`[${new Date().toLocaleTimeString()}] [WARN] [${tag}] ${msg}`),
+    console.warn(`[${new Date().toLocaleTimeString()}] [WARN] [${tag}]`, msg),
   error: (tag, msg) =>
-    console.error(
-      `[${new Date().toLocaleTimeString()}] [ERR ] [${tag}] ${msg}`,
-    ),
+    console.error(`[${new Date().toLocaleTimeString()}] [ERR ] [${tag}]`, msg),
   debug: (tag, msg) =>
-    console.log(`[${new Date().toLocaleTimeString()}] [DBUG] [${tag}] ${msg}`),
+    console.log(`[${new Date().toLocaleTimeString()}] [DBUG] [${tag}]`, msg),
 };
 
 // Initialization
@@ -59,6 +58,30 @@ const PORT = 9864;
 const server = express();
 const serverHttp = http.createServer(server);
 const io = new Server(serverHttp);
+const instance = new Bonjour();
+
+instance.find({ type: "encore-server" }, async (service) => {
+  try {
+    let res = await fetch(
+      `http://${service.referer.address}:${service.port}/info`,
+    );
+    let serverInfo = await res.json();
+    logger.info(
+      "SYSTEM",
+      `Found Encore Song Update server: ${serverInfo.serverName} (${service.host})`,
+    );
+    logger.info(
+      "SYSTEM",
+      `Library hosted: ${serverInfo.libraryInformation.title}`,
+    );
+  } catch (e) {
+    logger.error(
+      "SYSTEM",
+      "Encore failed to grab info of the Song Update server",
+    );
+    logger.error("SYSTEM", e);
+  }
+});
 
 const kuroshiro = new Kuroshiro();
 kuroshiro.init(new KuromojiAnalyzer());

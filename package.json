@@ -29,6 +29,7 @@
   "homepage": "./",
   "dependencies": {
     "@xhayper/discord-rpc": "^1.2.0",
+    "bonjour-service": "^1.3.0",
     "cors": "^2.8.5",
     "electron-squirrel-startup": "^1.0.1",
     "express": "^4.19.2",
