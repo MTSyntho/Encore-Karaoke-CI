@@ -3969,6 +3969,7 @@ p + .flex-list button {
 .forte-piano-note {
   position: absolute;
   height: 8px;
+  min-width: 15px;
   background-color: #89cff0;
   border-radius: 4px;
   border: 1px solid rgba(1, 1, 65, 0.8);
