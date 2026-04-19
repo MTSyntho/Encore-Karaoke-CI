@@ -1552,7 +1552,7 @@ const pkg = {
 
               if (
                 candidateChannels.length > 0 &&
-                candidateChannels[0].matchRatio > 0.15
+                candidateChannels[0].matchRatio > 0.2
               ) {
                 const best = candidateChannels[0];
                 console.log(
