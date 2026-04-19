@@ -86,6 +86,7 @@ class EncoreController {
       isSearchOverlayVisible: false,
       currentSongIsYouTube: false,
       currentSongIsMultiplexed: false,
+      currentSongIsMIDI: false,
       currentSongIsMV: false,
       isTransitioning: false,
       isTypingNumber: false,
@@ -1364,11 +1365,6 @@ class EncoreController {
         }
       }, 5000);
     } else if (newMode === "player") {
-      if (this.state.currentSongIsMultiplexed) {
-        this.Forte.togglePianoRollVisibility(true);
-      } else {
-        this.Forte.togglePianoRollVisibility(false);
-      }
       this.dom.playerUi.classOff("hidden");
       this.infoBar.showDefault();
     } else if (newMode === "yt-search") {
@@ -1907,6 +1903,19 @@ class EncoreController {
 
       const pbState = this.Forte.getPlaybackState();
       this.state.currentSongIsMultiplexed = pbState.isMultiplexed;
+      this.state.currentSongIsMIDI = pbState.isMidi;
+
+      console.log("Is multiplexed?", this.state.currentSongIsMultiplexed);
+      console.log("Is midi?", this.state.currentSongIsMIDI);
+      console.log("Is mtv?", this.state.currentSongIsMV);
+      if (this.state.currentSongIsMultiplexed) {
+        this.Forte.togglePianoRollVisibility(true);
+      } else if (this.state.currentSongIsMIDI) {
+        console.log("this should appear");
+        this.Forte.togglePianoRollVisibility(true);
+      } else {
+        this.Forte.togglePianoRollVisibility(false);
+      }
 
       let icon = "rs.png";
       if (this.state.currentSongIsMV) icon = "mtv.png";
@@ -1921,7 +1930,7 @@ class EncoreController {
       if (!this.state.currentSongIsYouTube) {
         this.scoreHud.show(0);
         this.Forte.togglePianoRollVisibility(
-          this.state.currentSongIsMultiplexed,
+          this.state.currentSongIsMultiplexed || this.state.currentSongIsMIDI,
         );
       }
 

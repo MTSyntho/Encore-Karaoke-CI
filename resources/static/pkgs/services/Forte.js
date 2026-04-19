@@ -376,22 +376,46 @@ function updateScore(currentTime) {
     ? 12 * Math.log2(micPitch / 440) + 69
     : 0;
 
-  if (state.playback.isMultiplexed && state.scoring.vocalGuideAnalyser) {
-    if (!guideAnalyserBuffer)
-      guideAnalyserBuffer = new Float32Array(
-        state.scoring.vocalGuideAnalyser.fftSize,
+  const hasGuideNotes =
+    state.playback.guideNotes && state.playback.guideNotes.length > 0;
+
+  if (
+    hasGuideNotes ||
+    (state.playback.isMultiplexed && state.scoring.vocalGuideAnalyser)
+  ) {
+    let targetMidiPitch = 0;
+    let isGuideNoteActive = false;
+
+    if (hasGuideNotes) {
+      const currentNote = state.playback.guideNotes.find(
+        (n) =>
+          currentTime >= n.startTime && currentTime < n.startTime + n.duration,
+      );
+      if (currentNote) {
+        targetMidiPitch = currentNote.pitch;
+        isGuideNoteActive = true;
+      }
+    } else {
+      if (!guideAnalyserBuffer)
+        guideAnalyserBuffer = new Float32Array(
+          state.scoring.vocalGuideAnalyser.fftSize,
+        );
+
+      state.scoring.vocalGuideAnalyser.getFloatTimeDomainData(
+        guideAnalyserBuffer,
+      );
+      const [guidePitch, guideClarity] = state.scoring.pitchDetector.findPitch(
+        guideAnalyserBuffer,
+        sampleRate,
       );
 
-    state.scoring.vocalGuideAnalyser.getFloatTimeDomainData(
-      guideAnalyserBuffer,
-    );
-    const [guidePitch, guideClarity] = state.scoring.pitchDetector.findPitch(
-      guideAnalyserBuffer,
-      sampleRate,
-    );
+      isGuideNoteActive =
+        guideClarity >= GUIDE_CLARITY_THRESHOLD && guidePitch > 50;
+      if (isGuideNoteActive) {
+        targetMidiPitch = 12 * Math.log2(guidePitch / 440) + 69;
+      }
+    }
 
-    const isGuideNoteActive =
-      guideClarity >= GUIDE_CLARITY_THRESHOLD && guidePitch > 50;
     const wasGuideNoteActive = state.scoring.isVocalGuideNoteActive;
     state.scoring.isVocalGuideNoteActive = isGuideNoteActive;
 
@@ -402,12 +426,13 @@ function updateScore(currentTime) {
 
     let isCorrectPitch = false;
     if (isGuideNoteActive && isSinging) {
-      let normalizedMicPitch = micPitch;
-      while (normalizedMicPitch < guidePitch * 0.75) normalizedMicPitch *= 2;
-      while (normalizedMicPitch > guidePitch * 1.5) normalizedMicPitch /= 2;
+      let normalizedMicMidi = midiMicPitch;
+      while (normalizedMicMidi < targetMidiPitch - 6) normalizedMicMidi += 12;
+      while (normalizedMicMidi > targetMidiPitch + 6) normalizedMicMidi -= 12;
 
-      const centsDifference = 1200 * Math.log2(normalizedMicPitch / guidePitch);
-      if (Math.abs(centsDifference) < 70) isCorrectPitch = true;
+      if (Math.abs(normalizedMicMidi - targetMidiPitch) < 0.7) {
+        isCorrectPitch = true;
+      }
     }
 
     if (isCorrectPitch && !state.scoring.hasHitCurrentNote) {
@@ -1365,6 +1390,8 @@ const pkg = {
             throw e;
           }
 
+          logVerbose("Notes", parsedMidi.getNoteTimes());
+
           state.playback.sequencer = new Sequencer(state.playback.synthesizer);
           state.playback.sequencer.loop = false;
 
@@ -1475,6 +1502,91 @@ const pkg = {
           }
 
           if (rawLyrics.length > 0) {
+            const lyricTimes = rawLyrics
+              .filter((l) => l.ticks !== undefined)
+              .map((l) => parsedMidi.midiTicksToSeconds(l.ticks));
+
+            if (lyricTimes.length > 5) {
+              const channels = parsedMidi.getNoteTimes();
+              const candidateChannels = [];
+
+              for (let i = 0; i < 16; i++) {
+                if (i === 9) continue;
+
+                const notes = channels[i];
+                if (!notes || notes.length === 0) continue;
+                s;
+                if (notes.length < lyricTimes.length * 0.3) continue;
+                if (notes.length > lyricTimes.length * 4) continue;
+
+                let chordNotes = 0;
+                for (let n = 1; n < notes.length; n++) {
+                  if (Math.abs(notes[n].start - notes[n - 1].start) < 0.05) {
+                    chordNotes++;
+                  }
+                }
+                const polyphonyRatio = chordNotes / notes.length;
+                if (polyphonyRatio > 0.25) continue;
+
+                let matches = 0;
+                for (const lTime of lyricTimes) {
+                  if (notes.some((n) => Math.abs(n.start - lTime) < 0.1)) {
+                    matches++;
+                  }
+                }
+                const matchRatio = matches / lyricTimes.length;
+
+                candidateChannels.push({
+                  index: i,
+                  notes: notes,
+                  matchRatio,
+                  polyphonyRatio,
+                });
+              }
+
+              candidateChannels.sort((a, b) => {
+                if (Math.abs(b.matchRatio - a.matchRatio) < 0.05) {
+                  return a.polyphonyRatio - b.polyphonyRatio;
+                }
+                return b.matchRatio - a.matchRatio;
+              });
+
+              if (
+                candidateChannels.length > 0 &&
+                candidateChannels[0].matchRatio > 0.15
+              ) {
+                const best = candidateChannels[0];
+                console.log(
+                  `[FORTE SVC] 🎵 Vocal Guide tracked on Channel ${best.index + 1} (Match: ${(best.matchRatio * 100).toFixed(1)}%, Polyphony: ${(best.polyphonyRatio * 100).toFixed(1)}%)`,
+                );
+
+                const monoNotes = [];
+                best.notes.forEach((n) => {
+                  const existing = monoNotes.find(
+                    (mn) => Math.abs(mn.startTime - n.start) < 0.05,
+                  );
+                  if (existing) {
+                    if (n.midiNote > existing.pitch)
+                      existing.pitch = n.midiNote;
+                  } else {
+                    monoNotes.push({
+                      id: monoNotes.length,
+                      pitch: n.midiNote,
+                      startTime: n.start,
+                      duration: n.length,
+                    });
+                  }
+                });
+                state.playback.guideNotes = monoNotes;
+              } else {
+                console.log(
+                  "[FORTE SVC] ⚠️ No clear vocal guide track found. Falling back to Key-Aware Scoring.",
+                );
+              }
+            }
+          }
+
+          if (rawLyrics.length > 0) {
             const totalLength = rawLyrics.reduce(
               (acc, val) => acc + (val.data ? val.data.byteLength : 0),
               0,
@@ -1575,6 +1687,14 @@ const pkg = {
           state.playback.midiGain.connect(state.recording.trackDelayNode);
         }
 
+        if (state.playback.guideNotes && state.playback.guideNotes.length > 0) {
+          pianoRollTrack.clear();
+          renderPianoRollNotes(state.playback.guideNotes);
+          if (state.ui.pianoRollVisible && pianoRollContainer) {
+            pianoRollContainer.classOn("visible");
+          }
+        }
+
         state.playback.sequencer.currentTime = 0;
         state.playback.sequencer.play();
         state.playback.status = "playing";
@@ -1588,14 +1708,15 @@ const pkg = {
           state.playback.transpose / 12,
         );
 
-        if (state.playback.isMultiplexed) {
-          if (state.playback.guideNotes) {
-            pianoRollTrack.clear();
-            renderPianoRollNotes(state.playback.guideNotes);
-            if (state.ui.pianoRollVisible)
-              pianoRollContainer.classOn("visible");
+        if (state.playback.guideNotes && state.playback.guideNotes.length > 0) {
+          pianoRollTrack.clear();
+          renderPianoRollNotes(state.playback.guideNotes);
+          if (state.ui.pianoRollVisible) {
+            pianoRollContainer.classOn("visible");
           }
+        }
 
+        if (state.playback.isMultiplexed) {
           const vocalGuideAnalyser = audioContext.createAnalyser();
           vocalGuideAnalyser.fftSize = 2048;
           state.scoring.vocalGuideAnalyser = vocalGuideAnalyser;
