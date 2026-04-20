@@ -1839,6 +1839,12 @@ p + .flex-list button {
   left: 50%;
   transform: translate(-50%, -50%);
   z-index: 12;
+  pointer-events: none;
+}
+
+.mode-menu.is-typing .main-content {
+  opacity: 1;
+  pointer-events: all;
 }
 
 .main-content h1 {
@@ -2670,6 +2676,7 @@ p + .flex-list button {
   background: linear-gradient(to top, rgba(0, 0, 0, 0.9) 0%, transparent 50%);
   z-index: 15;
   padding-bottom: 5vh;
+  pointer-events: none;
 }
 
 .mode-player-youtube .player-ui {
