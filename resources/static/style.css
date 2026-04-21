@@ -3998,42 +3998,6 @@ p + .flex-list button {
   display: none;
 }
 
-.forte-score-reason {
-  position: fixed;
-  top: calc(2rem + 50px + 1rem + 6.3rem + 1rem - 50px);
-  left: 50%;
-  transform: translate(-50%, 20px);
-  font-family: "Rajdhani", sans-serif;
-  font-size: 2.5rem;
-  font-weight: 900;
-  letter-spacing: 0.1em;
-  text-shadow: 2px 2px 8px rgba(0, 0, 0, 0.8);
-  -webkit-text-stroke: 1px #000;
-  paint-order: stroke fill;
-  z-index: 20;
-  opacity: 0;
-  transition:
-    opacity 0.3s ease,
-    transform 0.3s ease;
-  pointer-events: none;
-  will-change: opacity, transform;
-}
-
-.forte-score-reason.visible {
-  opacity: 1;
-  transform: translate(-50%, 0);
-}
-
-.forte-score-reason.type-pitch {
-  color: #89cff0;
-}
-.forte-score-reason.type-vibrato {
-  color: #22c55e;
-}
-.forte-score-reason.type-transition {
-  color: #f59e0b;
-}
-
 /* ==========================================================================
    16. Badges & QR Code
    ========================================================================== */
