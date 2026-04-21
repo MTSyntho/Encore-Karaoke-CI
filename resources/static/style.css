@@ -3020,7 +3020,7 @@ p + .flex-list button {
 /* --- Interlude Overlay & Tip Box --- */
 .interlude-overlay {
   position: absolute;
-  top: 40%;
+  bottom: 5%;
   left: 50%;
   transform: translate(-50%, -50%);
   background: rgba(10, 10, 20, 0.85);
