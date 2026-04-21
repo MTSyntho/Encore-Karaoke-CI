@@ -636,7 +636,7 @@ class EncoreController {
       .appendTo(this.dom.bottomActions);
     new Html("div")
       .classOn("action-button")
-      .text("Mic/Music Setup (M)")
+      .text("Mixer (M)")
       .on("click", () => this.mixer.toggle())
       .appendTo(this.dom.bottomActions);
 
