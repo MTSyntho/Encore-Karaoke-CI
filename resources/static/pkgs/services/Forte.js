@@ -209,7 +209,6 @@ let pianoRollTrack = null;
 let pianoRollPlayhead = null;
 let pianoRollUserPitch = null;
 let lastHitNoteElement = null;
-let scoreReasonDisplay = null;
 let scoreReasonTimeout = null;
 const PIXELS_PER_SECOND = 150;
 
@@ -314,30 +313,6 @@ const state = {
   },
   verbose: true,
 };
-
-/**
- * Pops up a brief on-screen indicator describing scoring evaluations.
- *
- * @param {string} text - The content of the notification.
- * @param {string} [type="pitch"] - Sub-type for styling.
- */
-function showScoreReason(text, type = "pitch") {
-  if (scoreReasonTimeout) {
-    clearTimeout(scoreReasonTimeout);
-    scoreReasonTimeout = null;
-  }
-  if (!state.ui.pianoRollVisible) return;
-  scoreReasonDisplay
-    .classOff("type-pitch", "type-vibrato", "type-transition")
-    .classOn(`type-${type}`)
-    .text(text)
-    .classOn("visible");
-
-  scoreReasonTimeout = setTimeout(() => {
-    scoreReasonDisplay.classOff("visible");
-    scoreReasonTimeout = null;
-  }, 1200);
-}
 
 /**
  * Analyzes audio input and updates scoring/pitch metrics continuously.
@@ -445,7 +420,6 @@ function updateScore(currentTime) {
     if (isCorrectPitch && !state.scoring.hasHitCurrentNote) {
       state.scoring.hasHitCurrentNote = true;
       state.scoring.notesHit++;
-      showScoreReason("PERFECT", "pitch");
 
       if (
         pianoRollContainer &&
@@ -885,9 +859,6 @@ const pkg = {
     pianoRollUserPitch = new Html("div")
       .classOn("forte-piano-roll-user-pitch")
       .appendTo(pianoRollContainer);
-    scoreReasonDisplay = new Html("div")
-      .classOn("forte-score-reason")
-      .appendTo("body");
 
     try {
       const config = await window.config.getAll();
@@ -1246,11 +1217,6 @@ const pkg = {
           logVerbose("Piano roll container moved", container.elm);
         }
 
-        if (scoreReasonDisplay) {
-          scoreReasonDisplay.appendTo(container);
-          logVerbose("Score reason display moved", container.elm);
-        }
-
         return true;
       } catch (e) {
         console.error("[FORTE SVC] Failed to move piano roll container:", e);
@@ -1268,10 +1234,8 @@ const pkg = {
       state.ui.pianoRollVisible = bool;
       if (bool) {
         if (pianoRollContainer) pianoRollContainer.classOn("visible");
-        if (scoreReasonDisplay) scoreReasonDisplay.classOn("visible");
       } else {
         if (pianoRollContainer) pianoRollContainer.classOff("visible");
-        if (scoreReasonDisplay) scoreReasonDisplay.classOff("visible");
       }
     },
 
@@ -1360,13 +1324,6 @@ const pkg = {
 
       if (pianoRollContainer) pianoRollContainer.classOff("visible");
       if (pianoRollTrack) pianoRollTrack.clear();
-      if (scoreReasonDisplay) {
-        scoreReasonDisplay.classOff("visible");
-        if (scoreReasonTimeout) {
-          clearTimeout(scoreReasonTimeout);
-          scoreReasonTimeout = null;
-        }
-      }
 
       const isMidi =
         url.toLowerCase().endsWith(".mid") ||
@@ -1843,10 +1800,6 @@ const pkg = {
           sourceNode.connect(state.scoring.musicAnalyser);
 
           if (pianoRollContainer) pianoRollContainer.classOff("visible");
-          if (scoreReasonDisplay) {
-            scoreReasonDisplay.classOff("visible");
-            if (scoreReasonTimeout) clearTimeout(scoreReasonTimeout);
-          }
           if (state.recording.trackDelayNode) {
             sourceNode.connect(state.recording.trackDelayNode);
           }
@@ -1943,13 +1896,6 @@ const pkg = {
      */
     stopTrack: () => {
       if (pianoRollContainer) pianoRollContainer.classOff("visible");
-      if (scoreReasonDisplay) {
-        scoreReasonDisplay.classOff("visible");
-        if (scoreReasonTimeout) {
-          clearTimeout(scoreReasonTimeout);
-          scoreReasonTimeout = null;
-        }
-      }
 
       if (state.playback.status === "stopped") return;
 
@@ -2583,7 +2529,6 @@ const pkg = {
     console.log("[FORTE SVC] Shutting down.");
 
     if (pianoRollContainer) pianoRollContainer.cleanup();
-    if (scoreReasonDisplay) scoreReasonDisplay.cleanup();
 
     if (state.scoring.micStream) {
       state.scoring.micStream.getTracks().forEach((track) => track.stop());
