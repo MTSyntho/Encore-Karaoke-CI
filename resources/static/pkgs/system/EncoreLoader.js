@@ -121,7 +121,7 @@ const pkg = {
   async waitForLibrary() {
     const fsSvc = root.Processes.getService("FsSvc").data;
     statusP.text(
-      "No library detected.\nPlease insert a drive with an EncoreLibrary folder.",
+      "No library detected.\nOpen the Library Manager to import a Library by clicking the LIB button.",
     );
 
     return new Promise((resolve) => {

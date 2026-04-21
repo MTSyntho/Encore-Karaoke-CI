@@ -6,6 +6,8 @@ const {
   WebContentsView,
   ipcMain,
   globalShortcut,
+  dialog,
+  shell,
 } = require("electron");
 const path = require("path");
 const fs = require("fs");
@@ -181,13 +183,14 @@ try {
 let discordClient = new Client({ clientId: "1408795513397973052" });
 let rpcReconnAttempts = 0;
 let isRpcReconnecting = false;
+let currentRPCState = "Booting up...";
 
 function setupDiscordRPC() {
   discordClient.on("ready", () => {
     logger.info("DISCORD", "Encore Karaoke RPC is ready!");
     rpcReconnAttempts = 0;
     discordClient.user?.setActivity({
-      details: "Booting up...",
+      details: currentRPCState,
       largeImageKey: "hoshi",
       largeImageText: "Encore Karaoke",
     });
@@ -567,6 +570,13 @@ app.whenReady().then(() => {
     BrowserWindow.fromWebContents(event.sender)?.close();
   });
 
+  ipcMain.on("app-close", (event) => {
+    BrowserWindow.fromWebContents(event.sender)?.close();
+    BrowserWindow.getAllWindows().forEach((w) => {
+      w.close();
+    });
+  });
+
   ipcMain.on("simulate-key", (event, keyChar) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (!win) return;
@@ -910,7 +920,240 @@ app.whenReady().then(() => {
     },
   );
 
+  let libraryManagerWin = null;
+
+  ipcMain.on("open-library-manager", () => {
+    if (libraryManagerWin) {
+      libraryManagerWin.focus();
+      return;
+    }
+
+    libraryManagerWin = new BrowserWindow({
+      title: "Encore Library Manager",
+      width: 1000,
+      height: 700,
+      icon: "resources/icon.png",
+      frame: process.platform !== "darwin" ? false : true,
+      titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "hidden",
+      backgroundColor: "#080810",
+      webPreferences: {
+        preload: path.join(__dirname, "preload.js"),
+        contextIsolation: true,
+        nodeIntegration: false,
+      },
+    });
+
+    libraryManagerWin.loadURL(
+      `file://${__dirname}/resources/static/library-manager.html?platform=${process.platform}`,
+    );
+
+    libraryManagerWin.on("closed", () => {
+      libraryManagerWin = null;
+    });
+  });
+
+  ipcMain.handle("libmgr-get-config", () => {
+    const knownPaths = Config.getItem("knownLibraries") || [];
+    const libraries = [];
+
+    for (const libPath of knownPaths) {
+      const manifestPath = path.join(libPath, "manifest.json");
+      if (fs.existsSync(manifestPath)) {
+        try {
+          const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+          libraries.push({ path: libPath, manifest });
+        } catch (e) {
+          libraries.push({
+            path: libPath,
+            manifest: {
+              title: "Invalid Library",
+              description: "Corrupt manifest.json",
+            },
+          });
+        }
+      }
+    }
+
+    return {
+      active: Config.getItem("libraryPath"),
+      libraries: libraries,
+    };
+  });
+
+  ipcMain.handle("libmgr-scan-drives", async () => {
+    try {
+      const disks = await si.fsSize();
+      const mountPoints = [...new Set(disks.map((d) => d.mount))];
+      let known = Config.getItem("knownLibraries") || [];
+      let foundCount = 0;
+
+      for (const mount of mountPoints) {
+        let checkPath = path.join(mount, "EncoreLibrary").replace(/\\/g, "/");
+        if (!checkPath.endsWith("/")) checkPath += "/";
+
+        if (
+          fs.existsSync(path.join(checkPath, "manifest.json")) &&
+          !known.includes(checkPath)
+        ) {
+          known.push(checkPath);
+          foundCount++;
+        }
+      }
+
+      Config.setItem("knownLibraries", known);
+      return foundCount;
+    } catch (e) {
+      return 0;
+    }
+  });
+
+  ipcMain.handle("libmgr-add-library", async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const result = await dialog.showOpenDialog(win, {
+      title: "Select or Create Encore Library Folder",
+      properties: ["openDirectory", "createDirectory"],
+    });
+
+    if (result.canceled) return null;
+
+    let folderPath = result.filePaths[0].replace(/\\/g, "/");
+    if (!folderPath.endsWith("/")) folderPath += "/";
+
+    const manifestPath = path.join(folderPath, "manifest.json");
+    if (!fs.existsSync(manifestPath)) {
+      const folderName = path.basename(path.dirname(folderPath));
+      const defaultManifest = {
+        title: `${folderName} (Custom Library)`,
+        description: "A custom library created via Encore Library Manager.",
+        additionalContents: { bgvCategories: [], bumperImages: [] },
+      };
+      fs.writeFileSync(manifestPath, JSON.stringify(defaultManifest, null, 2));
+    }
+
+    let known = Config.getItem("knownLibraries") || [];
+    if (!known.includes(folderPath)) {
+      known.push(folderPath);
+      Config.setItem("knownLibraries", known);
+    }
+
+    return folderPath;
+  });
+
+  ipcMain.on("libmgr-open-folder", (event, targetPath) => {
+    if (fs.existsSync(targetPath)) shell.openPath(targetPath);
+  });
+
+  ipcMain.handle("libmgr-get-library-contents", async (event, folderPath) => {
+    try {
+      const files = await fs.promises.readdir(folderPath);
+      const allowedExts = [
+        ".mp3",
+        ".wav",
+        ".m4a",
+        ".mid",
+        ".kar",
+        ".mp4",
+        ".mkv",
+        ".webm",
+        ".avi",
+      ];
+      const songs = files.filter((f) =>
+        allowedExts.includes(path.extname(f).toLowerCase()),
+      );
+      return songs;
+    } catch (e) {
+      return [];
+    }
+  });
+
+  ipcMain.handle("libmgr-select-bgv-files", async (event, folderPath) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const result = await dialog.showOpenDialog(win, {
+      title: "Select Background Videos",
+      defaultPath: folderPath,
+      properties: ["openFile", "multiSelections"],
+      filters: [
+        { name: "Videos", extensions: ["mp4", "mkv", "webm", "avi", "mov"] },
+      ],
+    });
+
+    if (result.canceled) return { relativePaths: [], outsideCount: 0 };
+
+    const relativePaths = [];
+    let outsideCount = 0;
+
+    for (const filePath of result.filePaths) {
+      const normalizedFile = filePath.replace(/\\/g, "/");
+      const normalizedFolder = folderPath.replace(/\\/g, "/");
+
+      if (normalizedFile.startsWith(normalizedFolder)) {
+        let relPath = normalizedFile.substring(normalizedFolder.length);
+        if (relPath.startsWith("/")) relPath = relPath.substring(1);
+        relativePaths.push(relPath);
+      } else {
+        outsideCount++;
+      }
+    }
+    return { relativePaths, outsideCount };
+  });
+
+  ipcMain.handle("libmgr-update-manifest", (event, payload) => {
+    try {
+      if (!payload || !payload.folderPath) {
+        return { success: false, error: "No folder path provided." };
+      }
+
+      const { folderPath, manifestData } = payload;
+      const manifestPath = path.join(folderPath, "manifest.json");
+
+      if (!fs.existsSync(manifestPath)) {
+        return {
+          success: false,
+          error: "manifest.json does not exist at the target path.",
+        };
+      }
+
+      fs.writeFileSync(manifestPath, JSON.stringify(manifestData, null, 2));
+      return { success: true };
+    } catch (e) {
+      logger.error(
+        "SYSTEM",
+        `Failed to save manifest at ${payload?.folderPath}: ${e.message}`,
+      );
+      return { success: false, error: e.message };
+    }
+  });
+
+  ipcMain.handle("libmgr-remove-library", async (event, folderPath) => {
+    let known = Config.getItem("knownLibraries") || [];
+    known = known.filter((p) => p !== folderPath);
+    Config.setItem("knownLibraries", known);
+    if (Config.getItem("libraryPath") === folderPath)
+      Config.setItem("libraryPath", null);
+    return { success: true };
+  });
+
+  ipcMain.handle("libmgr-set-active", async (event, folderPath) => {
+    const safeStates = ["Main Menu", "Booting up...", null, undefined, ""];
+    if (!safeStates.includes(currentRPCState)) {
+      return {
+        success: false,
+        reason: "Cannot change libraries while a song is playing.",
+      };
+    }
+    Config.setItem("libraryPath", folderPath);
+    const mainWin = BrowserWindow.getAllWindows().find(
+      (w) => w !== libraryManagerWin,
+    );
+    if (mainWin) {
+      const view = mainWin.contentView.children[0];
+      if (view) view.webContents.reload();
+    }
+    return { success: true };
+  });
+
   ipcMain.on("setRPC", (event, arg) => {
+    currentRPCState = arg.state;
     discordClient.user?.setActivity({
       state: arg.state,
       details: arg.details,

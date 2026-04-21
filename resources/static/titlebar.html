@@ -155,6 +155,17 @@
         color: #ff2222;
       }
 
+      .lib-btn {
+        color: #39ff14;
+        border-color: rgba(57, 255, 20, 0.3);
+      }
+
+      .lib-btn:hover {
+        color: #39ff14;
+        border-color: #39ff14;
+        background: rgba(57, 255, 20, 0.3);
+      }
+
       .window-controls button {
         background: transparent;
         border: none;
@@ -177,6 +188,7 @@
   <body>
     <div class="titlebar">
       <div class="section left-section">
+        <button onclick="openLibraryManager()" class="lib-btn">LIB</button>
         <button onclick="sendKey(']')">BGV</button>
         <button onclick="sendKey('Y')">SEARCH</button>
         <button onclick="sendKey('M')">MIXER</button>
@@ -232,7 +244,7 @@
         </button>
         <button
           class="close-btn"
-          onclick="window.desktopIntegration.ipc.send('window-close')"
+          onclick="window.desktopIntegration.ipc.send('app-close')"
         >
           ✕
         </button>
@@ -254,6 +266,10 @@
 
       function sendKey(keyChar) {
         window.desktopIntegration.ipc.send("simulate-key", keyChar);
+      }
+
+      function openLibraryManager() {
+        window.desktopIntegration.ipc.send("open-library-manager");
       }
 
       const npTitle = document.getElementById("np-title");

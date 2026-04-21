@@ -115,37 +115,56 @@ const pkg = {
     },
 
     /**
-     * Scans all root drives for 'EncoreLibrary' folders and reads their manifests.
+     * Scans known configured libraries and root drives for Encore libraries.
      * @returns {Promise<Array<{path: string, manifest: object}>>} A list of library objects.
      */
     findEncoreLibraries: async () => {
+      const config = await window.config.getAll();
+      const knownPaths = config.knownLibraries || [];
+
       const drives = await pkg.data.getDrives();
-      const checkPromises = drives.map(async (drive) => {
+      const checkLegacyPromises = drives.map(async (drive) => {
         const driveRoot = `${drive}/`;
         const rootContents = await pkg.data.getFolder(driveRoot);
+        if (!rootContents) return null;
+
         const libraryFolder = rootContents.find(
           (item) => item.name === "EncoreLibrary" && item.type === "folder",
         );
+        return libraryFolder ? `${driveRoot}EncoreLibrary/` : null;
+      });
 
-        if (libraryFolder) {
-          const libraryPath = `${driveRoot}EncoreLibrary/`;
-          const manifestPath = `${libraryPath}manifest.json`;
-          const manifestContent = await pkg.data.readFile(manifestPath);
-          let manifest = {
-            title: `Unknown Library (${libraryPath})`,
-            description: "Could not read or parse the manifest.json file.",
-          };
-          if (manifestContent) {
-            try {
-              manifest = JSON.parse(manifestContent);
-            } catch (e) {
-              console.warn(`[FsSvc] Invalid JSON in ${manifestPath}`);
-            }
+      const legacyPaths = (await Promise.all(checkLegacyPromises)).filter(
+        Boolean,
+      );
+
+      const allPaths = [...new Set([...knownPaths, ...legacyPaths])];
+
+      const checkPromises = allPaths.map(async (libPath) => {
+        let formattedPath = libPath.replace(/\\/g, "/");
+        if (!formattedPath.endsWith("/")) formattedPath += "/";
+
+        const manifestPath = `${formattedPath}manifest.json`;
+        const manifestContent = await pkg.data.readFile(manifestPath);
+
+        if (manifestContent) {
+          try {
+            const manifest = JSON.parse(manifestContent);
+            return { path: formattedPath, manifest };
+          } catch (e) {
+            console.warn(`[FsSvc] Invalid JSON in ${manifestPath}`);
+            return {
+              path: formattedPath,
+              manifest: {
+                title: "Invalid Library",
+                description: "Corrupted manifest.json",
+              },
+            };
           }
-          return { path: libraryPath, manifest };
         }
         return null;
       });
+
       const results = await Promise.all(checkPromises);
       return results.filter((lib) => lib !== null);
     },
