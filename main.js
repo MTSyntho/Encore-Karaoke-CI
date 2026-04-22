@@ -56,7 +56,7 @@ const versionInformation = {
 const kioskEnabled = process.argv.includes("--kiosk");
 const isDev = process.argv.includes("--dev");
 
-const PORT = 9864;
+let PORT = 0;
 const server = express();
 const serverHttp = http.createServer(server);
 const io = new Server(serverHttp);
@@ -615,6 +615,7 @@ app.whenReady().then(() => {
     logger.info("CONFIG", "Configuration merged with new data.");
   });
   ipcMain.handle("get-volume", async () => getVolume());
+  ipcMain.handle("get-port", () => PORT);
   ipcMain.handle("romanize", async (event, rawJapanese) => {
     const romaji = await kuroshiro.convert(rawJapanese, {
       to: "romaji",
@@ -1253,22 +1254,19 @@ app.whenReady().then(() => {
     }
   });
 
-  serverHttp.listen(PORT, () => {
-    let actualPort = serverHttp.address().port;
+  serverHttp.listen(0, () => {
+    PORT = serverHttp.address().port;
     instance.publish({
       name: bonjourId,
       type: "enmoku",
-      port: actualPort,
+      port: PORT,
     });
     instance.find({ type: "enmoku" }, async (service) => {
       if (service.name == bonjourId) {
         logger.info("LINK", "Encore Link is now discoverable");
       }
     });
-    logger.info(
-      "SERVER",
-      `Encore Karaoke server running on port ${actualPort}`,
-    );
+    logger.info("SERVER", `Encore Karaoke server running on port ${PORT}`);
     createWindow();
   });
 });

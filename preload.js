@@ -24,6 +24,10 @@ contextBridge.exposeInMainWorld("romanization", {
   romanize: async (rawJapanese) => ipcRenderer.invoke("romanize", rawJapanese),
 });
 
+contextBridge.exposeInMainWorld("networking", {
+  port: async (rawJapanese) => ipcRenderer.invoke("get-port"),
+});
+
 contextBridge.exposeInMainWorld("volume", {
   getVolume: async () => ipcRenderer.invoke("get-volume"),
   setVolume: async (vol) => ipcRenderer.send("set-volume", vol),

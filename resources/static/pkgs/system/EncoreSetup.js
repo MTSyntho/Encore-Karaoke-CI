@@ -1,4 +1,5 @@
 import Html from "/libs/html.js";
+import NetworkingUtility from "/libs/networkingUtlity.js";
 
 /**
  * Controller for the Encore Setup environment.
@@ -159,17 +160,21 @@ class EncoreSetupController {
    */
   async verifyPin(input) {
     const pinData = this.config.security?.pinData;
+    const actualPort = await NetworkingUtility.getPort();
     if (!pinData) return input === "0000";
     try {
-      const res = await fetch("http://127.0.0.1:9864/auth/verify-hash", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          password: input,
-          salt: pinData.salt,
-          hash: pinData.hash,
-        }),
-      });
+      const res = await fetch(
+        `http://127.0.0.1:${actualPort}/auth/verify-hash`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            password: input,
+            salt: pinData.salt,
+            hash: pinData.hash,
+          }),
+        },
+      );
       const data = await res.json();
       return data.valid;
     } catch (e) {
@@ -185,12 +190,16 @@ class EncoreSetupController {
    * @returns {Promise<Object|null>} An object containing the generated salt and hash.
    */
   async createPinHash(input) {
+    let actualPort = await NetworkingUtility.getPort();
     try {
-      const res = await fetch("http://127.0.0.1:9864/auth/create-hash", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password: input }),
-      });
+      const res = await fetch(
+        `http://127.0.0.1:${actualPort}/auth/create-hash`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ password: input }),
+        },
+      );
       return await res.json();
     } catch (e) {
       console.error("PIN Creation Error:", e);
@@ -1009,7 +1018,8 @@ class EncoreSetupController {
 
     this.Forte.setLatency(0);
 
-    const fileUrl = new URL("http://127.0.0.1:9864/getFile");
+    let actualPort = await NetworkingUtility.getPort();
+    const fileUrl = new URL(`http://127.0.0.1:${actualPort}/getFile`);
     fileUrl.searchParams.append("path", song.path);
     await this.Forte.loadTrack(fileUrl.href);
 
@@ -1574,13 +1584,14 @@ class EncoreSetupController {
     this.state.previewingVideo = true;
     this.renderView();
 
-    const audioUrl = new URL("http://127.0.0.1:9864/getFile");
+    let actualPort = await NetworkingUtility.getPort();
+    const audioUrl = new URL(`http://127.0.0.1:${actualPort}/getFile`);
     audioUrl.searchParams.append("path", mtvSong.path);
 
     this.showToast("LOADING TRACK...", "info");
     await this.Forte.loadTrack(audioUrl.href);
 
-    const videoUrl = new URL("http://127.0.0.1:9864/getFile");
+    const videoUrl = new URL(`http://127.0.0.1:${actualPort}/getFile`);
     videoUrl.searchParams.append("path", mtvSong.videoPath);
 
     this.previewVideoEl.attr({ src: videoUrl.href });

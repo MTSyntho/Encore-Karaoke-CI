@@ -1,4 +1,5 @@
 import Html from "/libs/html.js";
+import NetworkingUtility from "/libs/networkingUtlity.js";
 
 /**
  * BGVModule - Encore's BGV playback module
@@ -28,7 +29,8 @@ export class BGVModule {
    * Mount the video player to a container element
    * @param {HTMLElement} container - The DOM container for video playback
    */
-  mount(container) {
+  async mount(container) {
+    this.PORT = await NetworkingUtility.getPort();
     this.container = container;
     this.container.styleJs({
       backgroundColor: "#000",
@@ -75,6 +77,7 @@ export class BGVModule {
    * Load background video categories from manifest
    */
   async loadManifestCategories() {
+    this.PORT = await NetworkingUtility.getPort();
     try {
       const response = await fetch(
         `http://127.0.0.1:${this.PORT}/assets/video/bgv/manifest.json`,

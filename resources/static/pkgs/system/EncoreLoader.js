@@ -1,8 +1,10 @@
 import Html from "/libs/html.js";
+import NetworkingUtility from "/libs/networkingUtlity.js";
 
 let wrapper, Ui, Pid, Sfx;
 let root;
 let statusP;
+let actualPort = 9864;
 
 /**
  * Joins path parts with a given separator, normalizing leading and trailing slashes.
@@ -186,7 +188,7 @@ const pkg = {
       config.audioConfig?.useLibraryFont
     ) {
       statusP.text("Loading sounds...");
-      const url = new URL(`http://127.0.0.1:9864/getFile`);
+      const url = new URL(`http://127.0.0.1:${actualPort}/getFile`);
       const soundFontPath = pathJoin([
         libInfo.path,
         libInfo.manifest.additionalContents.soundFont,
@@ -309,6 +311,7 @@ const pkg = {
    */
   start: async function (Root) {
     root = Root;
+    actualPort = await NetworkingUtility.getPort();
     window.desktopIntegration?.ipc.send("setRPC", {
       details: "Booting up...",
     });

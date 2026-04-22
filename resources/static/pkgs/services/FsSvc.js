@@ -1,3 +1,4 @@
+import NetworkingUtility from "/libs/networkingUtlity.js";
 const jsmediatags = window.jsmediatags;
 
 // Internal state for the service to hold the cached song list and manifest
@@ -8,6 +9,8 @@ const state = {
   newSongs: [],
   isBuilding: false,
 };
+
+let actualPort = 9864;
 
 /**
  * Dispatches a custom event to notify the OS/apps that the song list is ready or updated.
@@ -45,6 +48,7 @@ const pkg = {
   type: "svc",
   privs: 0,
   start: async function (Root) {
+    actualPort = await NetworkingUtility.getPort();
     console.log("[FsSvc] File System Service started.");
     // Reset state on start
     state.currentLibraryPath = null;
@@ -61,7 +65,7 @@ const pkg = {
      */
     readFile: async (path) => {
       const params = new URLSearchParams({ path: path });
-      const url = `http://localhost:9864/getFile?${params.toString()}`;
+      const url = `http://localhost:${actualPort}/getFile?${params.toString()}`;
       try {
         const res = await fetch(url, { method: "GET" });
         if (!res.ok) {
@@ -84,7 +88,7 @@ const pkg = {
      * @returns {Promise<Array<string>>}
      */
     getDrives: async () => {
-      const url = `http://localhost:9864/drives`;
+      const url = `http://localhost:${actualPort}/drives`;
       try {
         const res = await fetch(url);
         return await res.json();
@@ -99,7 +103,7 @@ const pkg = {
      * @returns {Promise<Array<object>>}
      */
     getFolder: async (path) => {
-      const url = `http://localhost:9864/list`;
+      const url = `http://localhost:${actualPort}/list`;
       try {
         const res = await fetch(url, {
           method: "POST",
@@ -301,7 +305,7 @@ const pkg = {
             lrcPath: `${libraryPath}${basename}.lrc`,
           };
           try {
-            const urlObj = new URL("http://127.0.0.1:9864/getFile");
+            const urlObj = new URL(`http://127.0.0.1:${actualPort}/getFile`);
             urlObj.searchParams.append("path", fullPath);
             const tags = await new Promise((resolve, reject) => {
               jsmediatags.read(urlObj.href, {
@@ -412,7 +416,7 @@ const pkg = {
      * @returns {Promise<Array<string>>}
      */
     getUserBGVs: async () => {
-      const url = `http://localhost:9864/user-bgv-list`;
+      const url = `http://localhost:${actualPort}/user-bgv-list`;
       try {
         const res = await fetch(url);
         if (!res.ok) return [];

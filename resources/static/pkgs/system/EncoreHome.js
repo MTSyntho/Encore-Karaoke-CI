@@ -6,6 +6,7 @@ import { BGVModule } from "/modules/BGVPlayer.js";
 import { RecorderModule } from "/modules/Recorder.js";
 import { InfoBarModule } from "/modules/InfoBar.js";
 import { ScoreHUDModule } from "/modules/ScoreHUD.js";
+import NetworkingUtility from "/libs/networkingUtlity.js";
 
 const INTERLUDE_TIPS = [
   "TIP: You can use your phone to queue songs by scanning the QR code!",
@@ -71,6 +72,7 @@ class EncoreController {
     this.libraryInfo = this.FsSvc.getLibraryInfo();
 
     this.state = {
+      actualPort: 9864,
       mode: "menu",
       songNumber: "",
       highlightedIndex: -1,
@@ -175,6 +177,7 @@ class EncoreController {
     this.wrapper.classOn("loading");
     this.Forte.setPianoRollContainer(this.wrapper);
 
+    this.state.actualPort = await NetworkingUtility.getPort();
     this.state.windowsVolume = await window.volume.getVolume();
     console.log("[Encore] Windows volume", this.state.windowsVolume);
 
@@ -951,7 +954,9 @@ class EncoreController {
 
   playRecording(rec) {
     this.state.isPlayingRecording = true;
-    const videoUrl = new URL("http://127.0.0.1:9864/getFile");
+    const videoUrl = new URL(
+      `http://127.0.0.1:${this.state.actualPort}/getFile`,
+    );
     videoUrl.searchParams.append("path", rec.videoPath);
 
     const displayTitle =
@@ -1053,16 +1058,16 @@ class EncoreController {
 
     let remoteUrl = ``;
 
-    fetch("http://127.0.0.1:9864/cloud_info")
+    fetch(`http://127.0.0.1:${this.state.actualPort}/cloud_info`)
       .then((r) => r.json())
       .then((info) => {
         if (!info.roomCode) {
-          fetch("http://127.0.0.1:9864/local_ip")
+          fetch(`http://127.0.0.1:${this.state.actualPort}/local_ip`)
             .then((r) => r.text())
             .then((ip) => {
-              const remoteUrl = `http://${ip}:9864/remote`;
+              const remoteUrl = `http://${ip}:${this.state.actualPort}/remote`;
               img.attr({
-                src: `http://127.0.0.1:9864/qr?url=${encodeURIComponent(remoteUrl)}`,
+                src: `http://127.0.0.1:${this.state.actualPort}/qr?url=${encodeURIComponent(remoteUrl)}`,
               });
             })
             .catch((e) => this.dom.qrContainer.classOn("hidden"));
@@ -1071,7 +1076,7 @@ class EncoreController {
 
         const remoteUrl = `${info.relayUrl}/?room=${info.roomCode}`;
         img.attr({
-          src: `http://127.0.0.1:9864/qr?url=${encodeURIComponent(remoteUrl)}`,
+          src: `http://127.0.0.1:${this.state.actualPort}/qr?url=${encodeURIComponent(remoteUrl)}`,
         });
       })
       .catch((e) => this.dom.qrContainer.classOn("hidden"));
@@ -1303,7 +1308,9 @@ class EncoreController {
             this.dom.newSongScreen.styleJs({ opacity: 1 });
           }
         } else if (currentItem.type === "bumper") {
-          const imageUrl = new URL("http://127.0.0.1:9864/getFile");
+          const imageUrl = new URL(
+            `http://127.0.0.1:${this.state.actualPort}/getFile`,
+          );
           imageUrl.searchParams.append("path", currentItem.data);
           this.dom.standbyBumper.attr({ src: imageUrl.href });
 
@@ -1640,7 +1647,7 @@ class EncoreController {
 
     try {
       const res = await fetch(
-        `http://127.0.0.1:9864/yt-search?q=${encodeURIComponent(query)}`,
+        `http://127.0.0.1:${this.state.actualPort}/yt-search?q=${encodeURIComponent(query)}`,
       );
       const data = await res.json();
       const ytItems = (data.items || [])
@@ -1886,7 +1893,9 @@ class EncoreController {
       this.dom.midiContainer.styleJs({ opacity: "0" }).classOff("hidden");
 
       if (this.state.currentSongIsMV) {
-        const videoUrl = new URL("http://127.0.0.1:9864/getFile");
+        const videoUrl = new URL(
+          `http://127.0.0.1:${this.state.actualPort}/getFile`,
+        );
         videoUrl.searchParams.append("path", song.videoPath);
         mvPlayer = await this.bgv.playSingleVideo(videoUrl.href);
       } else {
@@ -1897,7 +1906,9 @@ class EncoreController {
       this.dom.ytContainer.classOn("hidden");
       this.dom.ytIframe.attr({ src: "" });
 
-      const trackUrl = new URL("http://127.0.0.1:9864/getFile");
+      const trackUrl = new URL(
+        `http://127.0.0.1:${this.state.actualPort}/getFile`,
+      );
       trackUrl.searchParams.append("path", song.path);
       await this.Forte.loadTrack(trackUrl.href);
 
@@ -2800,7 +2811,9 @@ class EncoreController {
         if (narrations && Array.isArray(narrations)) {
           const match = narrations.find((n) => s >= n.min && s <= n.max);
           if (match && match.file) {
-            const narrationUrl = new URL("http://127.0.0.1:9864/getFile");
+            const narrationUrl = new URL(
+              `http://127.0.0.1:${this.state.actualPort}/getFile`,
+            );
             narrationUrl.searchParams.append(
               "path",
               pathJoin([this.libraryInfo.path, match.file]),
@@ -3781,7 +3794,7 @@ class EncoreController {
             try {
               const query = d.value;
               const res = await fetch(
-                `http://127.0.0.1:9864/yt-search?q=${encodeURIComponent(query)}`,
+                `http://127.0.0.1:${this.state.actualPort}/yt-search?q=${encodeURIComponent(query)}`,
               );
               const data = await res.json();
 
