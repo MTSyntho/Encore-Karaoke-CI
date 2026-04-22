@@ -1254,7 +1254,22 @@ app.whenReady().then(() => {
     }
   });
 
-  serverHttp.listen(0, () => {
+  let tryPort = 9864;
+
+  serverHttp.on("error", (err) => {
+    if (err.code === "EADDRINUSE") {
+      logger.warn(
+        "SERVER",
+        `Port ${tryPort} is in use. Trying ${tryPort + 1}...`,
+      );
+      tryPort++;
+      serverHttp.listen(tryPort);
+    } else {
+      logger.error("SERVER", `Server error: ${err.message}`);
+    }
+  });
+
+  serverHttp.on("listening", () => {
     PORT = serverHttp.address().port;
     instance.publish({
       name: bonjourId,
@@ -1266,9 +1281,14 @@ app.whenReady().then(() => {
         logger.info("LINK", "Encore Link is now discoverable");
       }
     });
-    logger.info("SERVER", `Encore Karaoke server running on port ${PORT}`);
+    logger.info(
+      "SERVER",
+      `Encore Karaoke server running on stable port ${PORT}`,
+    );
     createWindow();
   });
+
+  serverHttp.listen(tryPort);
 });
 
 app.on("before-quit", () => {
