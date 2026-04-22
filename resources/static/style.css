@@ -2892,6 +2892,82 @@ p + .flex-list button {
   transition: none;
 }
 
+.hidden-syllable {
+  display: none !important;
+}
+
+/* it would be REALLY funny if I just use the characters from my novel for this */
+
+/* Female 1 (Yellow) (Hoshi) */
+.is-duet .duet-role-f .lyric-syllable-original::after,
+.is-duet .duet-role-f .lyric-syllable-romanized::after,
+.is-duet .duet-role-f .lyric-syllable-furigana::after {
+  color: #ffff33;
+  -webkit-text-stroke-color: #806600;
+}
+.is-duet .duet-role-f .lyric-syllable-original,
+.is-duet .duet-role-f .lyric-syllable-romanized,
+.is-duet .duet-role-f .lyric-syllable-furigana {
+  color: rgba(255, 255, 51, 0.35);
+  -webkit-text-stroke-color: rgba(128, 102, 0, 0.6);
+}
+
+/* Female 2 (Green) (Yuni) */
+.is-duet .duet-role-f2 .lyric-syllable-original::after,
+.is-duet .duet-role-f2 .lyric-syllable-romanized::after,
+.is-duet .duet-role-f2 .lyric-syllable-furigana::after {
+  color: #66ff66;
+  -webkit-text-stroke-color: #004d00;
+}
+.is-duet .duet-role-f2 .lyric-syllable-original,
+.is-duet .duet-role-f2 .lyric-syllable-romanized,
+.is-duet .duet-role-f2 .lyric-syllable-furigana {
+  color: rgba(102, 255, 102, 0.35);
+  -webkit-text-stroke-color: rgba(0, 77, 0, 0.6);
+}
+
+/* Male 1 (Blue) (Kai) */
+.is-duet .duet-role-m .lyric-syllable-original::after,
+.is-duet .duet-role-m .lyric-syllable-romanized::after,
+.is-duet .duet-role-m .lyric-syllable-furigana::after {
+  color: #66e6ff;
+  -webkit-text-stroke-color: #004d66;
+}
+.is-duet .duet-role-m .lyric-syllable-original,
+.is-duet .duet-role-m .lyric-syllable-romanized,
+.is-duet .duet-role-m .lyric-syllable-furigana {
+  color: rgba(102, 230, 255, 0.35);
+  -webkit-text-stroke-color: rgba(0, 77, 102, 0.6);
+}
+
+/* Male 2 (Red) (Rei) */
+.is-duet .duet-role-m2 .lyric-syllable-original::after,
+.is-duet .duet-role-m2 .lyric-syllable-romanized::after,
+.is-duet .duet-role-m2 .lyric-syllable-furigana::after {
+  color: #ff6666;
+  -webkit-text-stroke-color: #660000;
+}
+.is-duet .duet-role-m2 .lyric-syllable-original,
+.is-duet .duet-role-m2 .lyric-syllable-romanized,
+.is-duet .duet-role-m2 .lyric-syllable-furigana {
+  color: rgba(255, 102, 102, 0.35);
+  -webkit-text-stroke-color: rgba(102, 0, 0, 0.6);
+}
+
+/* All (Orange) */
+.is-duet .duet-role-a .lyric-syllable-original::after,
+.is-duet .duet-role-a .lyric-syllable-romanized::after,
+.is-duet .duet-role-a .lyric-syllable-furigana::after {
+  color: #ffb233;
+  -webkit-text-stroke-color: #804000;
+}
+.is-duet .duet-role-a .lyric-syllable-original,
+.is-duet .duet-role-a .lyric-syllable-romanized,
+.is-duet .duet-role-a .lyric-syllable-furigana {
+  color: rgba(255, 178, 51, 0.35);
+  -webkit-text-stroke-color: rgba(128, 64, 0, 0.6);
+}
+
 .player-progress {
   width: 100%;
   max-width: 1200px;

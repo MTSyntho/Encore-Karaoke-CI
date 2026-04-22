@@ -1825,6 +1825,15 @@ class EncoreController {
 
     this.state.currentSongIsMultiplexed = false;
 
+    this.dom.midiContainer.classOff("is-duet");
+    this.boundDuetEvent = () => {
+      this.dom.midiContainer.classOn("is-duet");
+    };
+    document.addEventListener(
+      "CherryTree.Forte.Playback.DuetDetected",
+      this.boundDuetEvent,
+    );
+
     this.state.currentSongIsYouTube = song.path.startsWith("yt://");
     this.state.currentSongIsMV = !!song.videoPath;
     this.state.reservationNumber = "";
@@ -2097,6 +2106,8 @@ class EncoreController {
       let displayableSyllableIndex = 0;
       let offsetIndex = pbState.decodedLyrics.length - lyricsToParse.length;
 
+      let currentDuetRole = "a";
+
       for (let i = 0; i < lyricsToParse.length; i++) {
         const syllableText = lyricsToParse[i];
         const tick = midiInfo.ticks[i + offsetIndex];
@@ -2109,6 +2120,16 @@ class EncoreController {
         const startsWithNewLine = /^[\r\n\/\\\\]/.test(syllableText);
         const endsWithNewLine = /[\r\n\/\\\\]$/.test(syllableText);
         let cleanText = syllableText.replace(/[\r\n\/\\]/g, "");
+        let displayText = cleanText;
+
+        const markerMatch = displayText.match(/\[(m|f|m2|f2|a)\]/g);
+        if (markerMatch) {
+          currentDuetRole = markerMatch[markerMatch.length - 1].replace(
+            /[\[\]]/g,
+            "",
+          );
+          displayText = displayText.replace(/\[(m|f|m2|f2|a)\]/g, "");
+        }
 
         if (startsWithNewLine && currentLineSyllables.length > 0) {
           lines.push(currentLineSyllables);
@@ -2116,12 +2137,14 @@ class EncoreController {
         }
 
         if (cleanText) {
-          let mainText = cleanText;
+          let mainText = displayText;
           let furiganaText = null;
-          const furiMatch = cleanText.match(/^(.+?)\[(.+?)\]$/);
-          if (furiMatch) {
-            mainText = furiMatch[1];
-            furiganaText = furiMatch[2];
+          if (displayText) {
+            const furiMatch = displayText.match(/^(.+?)\[(.+?)\]$/);
+            if (furiMatch) {
+              mainText = furiMatch[1];
+              furiganaText = furiMatch[2];
+            }
           }
 
           const syllable = {
@@ -2130,11 +2153,14 @@ class EncoreController {
             romanized: null,
             romanizationPromise: null,
             rawText: cleanText,
+            displayText: displayText,
             globalIndex: displayableSyllableIndex,
             lineIndex: lines.length,
             tick: tick,
             absoluteTime: absoluteTime,
             durationTicks: 0,
+            duetRole: currentDuetRole,
+            isHidden: displayText.length === 0,
           };
           allSyllables.push(syllable);
           currentLineSyllables.push(syllable);
@@ -2225,7 +2251,10 @@ class EncoreController {
         let wordIndex = 0;
 
         lineData.forEach((s) => {
-          if (!currentWord || s.rawText.startsWith(" ")) {
+          const checkText =
+            s.displayText !== undefined ? s.displayText : s.rawText;
+
+          if (!currentWord || checkText.startsWith(" ")) {
             currentWord = document.createElement("div");
             currentWord.className = "lyric-word";
             if (currentSongLineIndex > 0) {
@@ -2243,6 +2272,8 @@ class EncoreController {
 
           const container = document.createElement("div");
           container.className = "lyric-syllable-container";
+          if (s.isHidden) container.classList.add("hidden-syllable");
+          if (s.duetRole) container.classList.add(`duet-role-${s.duetRole}`);
           container.setAttribute("data-index", s.globalIndex);
 
           s.domElement = new Html(container);
@@ -2283,7 +2314,7 @@ class EncoreController {
           container.appendChild(romSpan);
 
           currentWord.appendChild(container);
-          if (s.rawText.endsWith(" ")) currentWord = null;
+          if (checkText.endsWith(" ")) currentWord = null;
         });
 
         displayEl.elm.appendChild(fragment);
@@ -2625,6 +2656,7 @@ class EncoreController {
     }
     if (this.dom.midiContainer) {
       this.dom.midiContainer.styleJs({ opacity: "1", pointerEvents: "all" });
+      this.dom.midiContainer.classOff("is-duet");
     }
 
     if (this.state.currentSongIsYouTube) {
@@ -2666,11 +2698,16 @@ class EncoreController {
         "CherryTree.Forte.Playback.TempoEvent",
         this.boundTempoUpdate,
       );
-
+    if (this.boundDuetEvent)
+      document.removeEventListener(
+        "CherryTree.Forte.Playback.DuetDetected",
+        this.boundDuetEvent,
+      );
     this.boundTimeUpdate = null;
     this.boundLyricEvent = null;
     this.boundScoreUpdate = null;
     this.boundTempoUpdate = null;
+    this.boundDuetEvent = null;
   }
 
   /**

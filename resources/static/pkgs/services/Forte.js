@@ -1424,6 +1424,7 @@ const pkg = {
             "metaEvent",
             "forte-meta",
             (e) => {
+              if (state.playback.status === "stopped") return;
               if (!e || !e.event) return;
 
               const dataArray = e.event.data;
@@ -1433,6 +1434,13 @@ const pkg = {
                 state.playback.lyricsEncoding,
               ).decode(dataArray);
               const cleanText = text.replace(/[\r\n\/\\]/g, "");
+
+              if (cleanText && cleanText == "@IENCOREDUET") {
+                logVerbose("This is a duet");
+                document.dispatchEvent(
+                  new CustomEvent("CherryTree.Forte.Playback.DuetDetected"),
+                );
+              }
 
               if (
                 cleanText &&
@@ -1898,6 +1906,7 @@ const pkg = {
       if (pianoRollContainer) pianoRollContainer.classOff("visible");
 
       if (state.playback.status === "stopped") return;
+      state.playback.status = "stopped";
 
       if (state.scoring.meydaAnalyzer) state.scoring.meydaAnalyzer.stop();
 
