@@ -422,7 +422,7 @@ const createWindow = () => {
   appView.webContents.setZoomFactor(zoomFactor);
 
   const resetZoom = () => {
-    zoomFactor = 1;
+    zoomFactor = 0.75;
     Config.setItem("zoomFactor", zoomFactor);
     appView.webContents.setZoomFactor(zoomFactor);
     return;
