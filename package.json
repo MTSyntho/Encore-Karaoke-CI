@@ -1,11 +1,8 @@
 {
   "name": "encore-karaoke",
   "version": "1.2.0",
-  "description": "An Electron-based karaoke app designed for karaoke booths.",
+  "description": "Turn your PC into a karaoke machine, complete with scoring and recording features. For karaoke fans, by karaoke fans.",
   "main": "main.js",
-  "directories": {
-    "doc": "docs"
-  },
   "scripts": {
     "start": "electron-forge start -- --dev",
     "package": "electron-forge package",
