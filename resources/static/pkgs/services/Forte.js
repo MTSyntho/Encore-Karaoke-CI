@@ -205,10 +205,8 @@ const sfxCache = new Map();
 let sfxMidiOriginalVolume = null;
 
 let pianoRollContainer = null;
-let pianoRollTrack = null;
-let pianoRollPlayhead = null;
-let pianoRollUserPitch = null;
-let lastHitNoteElement = null;
+let pianoRollCanvas = null;
+let pianoRollCtx = null;
 let scoreReasonTimeout = null;
 const PIXELS_PER_SECOND = 150;
 
@@ -423,23 +421,15 @@ function updateScore(currentTime) {
 
       if (
         pianoRollContainer &&
-        pianoRollContainer.elm.classList.contains("visible")
+        pianoRollContainer.elm.classList.contains("visible") &&
+        hasGuideNotes
       ) {
-        const notes = state.playback.guideNotes;
-        if (notes) {
-          const currentNote = notes.find(
-            (n) =>
-              currentTime >= n.startTime &&
-              currentTime < n.startTime + n.duration,
-          );
-          if (currentNote) {
-            const noteEl = pianoRollTrack.qs(`#forte-note-${currentNote.id}`);
-            if (noteEl) {
-              noteEl.classOn("hit");
-              lastHitNoteElement = noteEl;
-            }
-          }
-        }
+        const currentNote = state.playback.guideNotes.find(
+          (n) =>
+            currentTime >= n.startTime &&
+            currentTime < n.startTime + n.duration,
+        );
+        if (currentNote) currentNote.hitStatus = "hit";
       }
     }
 
@@ -563,8 +553,6 @@ function updateScore(currentTime) {
     pianoRollContainer &&
     pianoRollContainer.elm.classList.contains("visible")
   ) {
-    if (pianoRollUserPitch) pianoRollUserPitch.elm.style.opacity = "0";
-
     if (hasGuideNotes) {
       const currentNote = state.playback.guideNotes.find(
         (n) =>
@@ -572,15 +560,10 @@ function updateScore(currentTime) {
       );
 
       if (currentNote) {
-        const noteEl = pianoRollTrack.qs(`#forte-note-${currentNote.id}`);
-        if (noteEl) {
-          if (isCorrectPitch) {
-            noteEl.classOn("hit");
-            noteEl.classOff("miss");
-          } else if (isSinging) {
-            noteEl.classOn("miss");
-            noteEl.classOff("hit");
-          }
+        if (isCorrectPitch) {
+          currentNote.hitStatus = "hit";
+        } else if (isSinging) {
+          currentNote.hitStatus = "miss";
         }
       }
     }
@@ -626,12 +609,9 @@ function timingLoop() {
 
   if (
     pianoRollContainer &&
-    pianoRollContainer.elm.classList.contains("visible") &&
-    pianoRollTrack
+    pianoRollContainer.elm.classList.contains("visible")
   ) {
-    pianoRollTrack.elm.style.transform = `translateX(-${
-      currentTime * PIXELS_PER_SECOND
-    }px)`;
+    drawPianoRoll(currentTime);
   }
 
   if (state.scoring.enabled) {
@@ -665,34 +645,114 @@ function timingLoop() {
 }
 
 /**
- * Builds physical DOM elements representing pre-analyzed track notes on a visual piano roll.
- *
- * @param {Array<{id: number, pitch: number, startTime: number, duration: number}>} notes - The collection of notes.
+ * Synchronizes the canvas size and explicitly forces a render.
  */
 function renderPianoRollNotes(notes) {
-  if (!pianoRollTrack) return;
-  const fragment = document.createDocumentFragment();
+  if (!pianoRollCanvas || !pianoRollContainer) return;
+  drawPianoRoll(pkg.data.getPlaybackState().currentTime);
+}
+
+/**
+ * Draws the active viewport of the piano roll directly onto the canvas.
+ * Highly optimized: culls off-screen notes and avoids DOM layout recalculations.
+ */
+function drawPianoRoll(currentTime) {
+  if (!pianoRollCanvas || !pianoRollCtx || !pianoRollContainer) return;
+
+  const canvas = pianoRollCanvas.elm;
+  const ctx = pianoRollCtx;
+
+  const expectedWidth = pianoRollContainer.elm.clientWidth || window.innerWidth;
+  if (canvas.width !== expectedWidth) canvas.width = expectedWidth;
+  if (canvas.height !== 250) canvas.height = 250;
+
+  const width = canvas.width;
+  const height = canvas.height;
+
+  if (width === 0 || height === 0) return;
+
+  ctx.clearRect(0, 0, width, height);
+  ctx.globalAlpha = 1.0;
+
+  const playheadX = width / 2;
+  const minMidi = state.playback.guideRange?.min ?? 42;
+  const maxMidi = state.playback.guideRange?.max ?? 90;
+
+  const rangeDiff = Math.max(1, maxMidi - minMidi);
 
   const pitchToY = (pitch) => {
-    const minMidi = state.playback.guideRange?.min ?? 42;
-    const maxMidi = state.playback.guideRange?.max ?? 90;
-    const rollHeight = 250;
-    if (pitch < minMidi) return rollHeight;
+    if (pitch < minMidi) return height;
     if (pitch > maxMidi) return 0;
-    const normalizedPitch = (pitch - minMidi) / (maxMidi - minMidi);
-    return rollHeight - normalizedPitch * rollHeight;
+    const normalized = (pitch - minMidi) / rangeDiff;
+    return height - normalized * height;
   };
 
-  for (const note of notes) {
-    const div = document.createElement("div");
-    div.className = "forte-piano-note";
-    div.id = `forte-note-${note.id}`;
-    div.style.left = `${note.startTime * PIXELS_PER_SECOND}px`;
-    div.style.width = `${note.duration * PIXELS_PER_SECOND}px`;
-    div.style.top = `${pitchToY(note.pitch)}px`;
-    fragment.appendChild(div);
+  const notes = state.playback.guideNotes || [];
+
+  const viewStart = currentTime - playheadX / PIXELS_PER_SECOND;
+  const viewEnd = currentTime + (width - playheadX) / PIXELS_PER_SECOND;
+
+  for (let i = 0; i < notes.length; i++) {
+    const note = notes[i];
+
+    if (note.startTime + note.duration < viewStart) continue;
+    if (note.startTime > viewEnd) break;
+
+    const startX =
+      playheadX + (note.startTime - currentTime) * PIXELS_PER_SECOND;
+    const noteWidth = Math.max(note.duration * PIXELS_PER_SECOND, 4);
+    const y = pitchToY(note.pitch);
+
+    if (!isFinite(startX) || !isFinite(y) || !isFinite(noteWidth)) continue;
+
+    if (note.hitStatus === "hit") {
+      ctx.fillStyle = "#39ff14";
+      ctx.shadowColor = "#39ff14";
+      ctx.shadowBlur = 8;
+    } else if (note.hitStatus === "miss") {
+      ctx.fillStyle = "#ff4444";
+      ctx.shadowColor = "#ff4444";
+      ctx.shadowBlur = 8;
+    } else {
+      ctx.fillStyle = "#89cff0";
+      ctx.shadowColor = "rgba(1, 1, 65, 0.8)";
+      ctx.shadowBlur = 0;
+    }
+
+    ctx.beginPath();
+
+    if (typeof ctx.roundRect === "function") {
+      ctx.roundRect(startX, y - 6, noteWidth, 12, 6);
+    } else {
+      ctx.rect(startX, y - 6, noteWidth, 12);
+    }
+
+    ctx.fill();
+
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = "rgba(1, 1, 65, 0.8)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
   }
-  pianoRollTrack.elm.appendChild(fragment);
+
+  if (state.scoring.isSinging && state.scoring.currentMicMidi > 0) {
+    const userY = pitchToY(state.scoring.currentMicMidi);
+    if (isFinite(userY)) {
+      ctx.fillStyle = "#ffffff";
+      ctx.shadowColor = "#ffffff";
+      ctx.shadowBlur = 10;
+      ctx.beginPath();
+      ctx.arc(playheadX, userY, 8, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+  }
+
+  ctx.fillStyle = "#ffd700";
+  ctx.shadowColor = "#ffd700";
+  ctx.shadowBlur = 10;
+  ctx.fillRect(playheadX - 1.5, 0, 3, height);
+  ctx.shadowBlur = 0;
 }
 
 /**
@@ -791,11 +851,6 @@ function startIncrementalGuideAnalysis(audioBuffer) {
           firstChunkNote.duration -
           lastGlobalNote.startTime;
 
-        const noteEl = pianoRollTrack.qs(`#forte-note-${lastGlobalNote.id}`);
-        if (noteEl)
-          noteEl.elm.style.width = `${
-            lastGlobalNote.duration * PIXELS_PER_SECOND
-          }px`;
         foundNotes.shift();
       }
 
@@ -850,15 +905,20 @@ const pkg = {
     pianoRollContainer = new Html("div")
       .classOn("forte-piano-roll-container")
       .appendTo("body");
-    pianoRollTrack = new Html("div")
-      .classOn("forte-piano-roll-track")
+    pianoRollCanvas = new Html("canvas")
+      .classOn("forte-piano-roll-canvas")
       .appendTo(pianoRollContainer);
-    pianoRollPlayhead = new Html("div")
-      .classOn("forte-piano-roll-playhead")
-      .appendTo(pianoRollContainer);
-    pianoRollUserPitch = new Html("div")
-      .classOn("forte-piano-roll-user-pitch")
-      .appendTo(pianoRollContainer);
+    pianoRollCtx = pianoRollCanvas.elm.getContext("2d");
+
+    window.addEventListener("resize", () => {
+      if (pianoRollCanvas && pianoRollContainer) {
+        pianoRollCanvas.elm.width = pianoRollContainer.elm.clientWidth;
+        pianoRollCanvas.elm.height = 250;
+        if (state.playback.status !== "playing" && pkg.data) {
+          drawPianoRoll(pkg.data.getPlaybackState().currentTime);
+        }
+      }
+    });
 
     try {
       const config = await window.config.getAll();
@@ -1232,10 +1292,10 @@ const pkg = {
      */
     togglePianoRollVisibility: async (bool) => {
       state.ui.pianoRollVisible = bool;
-      if (bool) {
-        if (pianoRollContainer) pianoRollContainer.classOn("visible");
-      } else {
-        if (pianoRollContainer) pianoRollContainer.classOff("visible");
+      if (bool && pianoRollContainer) {
+        pianoRollContainer.classOn("visible");
+      } else if (pianoRollContainer) {
+        pianoRollContainer.classOff("visible");
       }
     },
 
@@ -1323,7 +1383,6 @@ const pkg = {
       state.scoring.activeMidiNotes.clear();
 
       if (pianoRollContainer) pianoRollContainer.classOff("visible");
-      if (pianoRollTrack) pianoRollTrack.clear();
 
       const isMidi =
         url.toLowerCase().endsWith(".mid") ||
@@ -1745,7 +1804,6 @@ const pkg = {
         }
 
         if (state.playback.guideNotes && state.playback.guideNotes.length > 0) {
-          pianoRollTrack.clear();
           renderPianoRollNotes(state.playback.guideNotes);
           if (state.ui.pianoRollVisible && pianoRollContainer) {
             pianoRollContainer.classOn("visible");
@@ -1768,7 +1826,6 @@ const pkg = {
         );
 
         if (state.playback.guideNotes && state.playback.guideNotes.length > 0) {
-          pianoRollTrack.clear();
           renderPianoRollNotes(state.playback.guideNotes);
           if (state.ui.pianoRollVisible) {
             pianoRollContainer.classOn("visible");
