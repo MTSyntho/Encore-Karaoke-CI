@@ -818,29 +818,85 @@ class EncoreController {
       let rows = [row];
 
       ctx.font = `900 ${mainFontSize}px "Radio Canada", sans-serif`;
-      const spaceW = ctx.measureText(" ").width * 0.8;
+
+      let words = [];
+      let currentWord = [];
 
       lineData.forEach((s) => {
-        ctx.font = `900 ${mainFontSize}px "Radio Canada", sans-serif`;
-        s.origW = s.text ? ctx.measureText(s.text).width : 0;
+        if (
+          currentWord.length > 0 &&
+          (s.rawText.startsWith(" ") || s.rawText.startsWith("　"))
+        ) {
+          words.push(currentWord);
+          currentWord = [];
+        }
 
-        ctx.font = `700 ${subFontSize}px "Radio Canada", sans-serif`;
-        s.furiW = s.furigana ? ctx.measureText(s.furigana).width : 0;
-        s.romW = s.romanized ? ctx.measureText(s.romanized).width : 0;
+        currentWord.push(s);
 
-        s.blockWidth =
-          Math.max(s.origW, s.furiW, s.romW) +
-          (s.rawText.endsWith(" ") ? spaceW : 0);
+        if (s.rawText.endsWith(" ") || s.rawText.endsWith("　")) {
+          words.push(currentWord);
+          currentWord = [];
+        }
+      });
+      if (currentWord.length > 0) words.push(currentWord);
 
-        if (currentX + s.blockWidth > logicalWidth * 0.95 && row.length > 0) {
+      words.forEach((word) => {
+        let accText = "";
+        let previousSubWidth = 0;
+        let requiresExpansion = false;
+
+        word.forEach((s) => {
+          ctx.font = `900 ${mainFontSize}px "Radio Canada", sans-serif`;
+          s.standaloneW = s.text ? ctx.measureText(s.text).width : 0;
+
+          ctx.font = `700 ${subFontSize}px "Radio Canada", sans-serif`;
+          s.furiW = s.furigana ? ctx.measureText(s.furigana).width : 0;
+          s.romW = s.romanized ? ctx.measureText(s.romanized).width : 0;
+
+          if (s.furiW > s.standaloneW || s.romW > s.standaloneW) {
+            requiresExpansion = true;
+          }
+        });
+
+        let fullWordText = word.map((s) => s.text || "").join("");
+
+        word.forEach((s, index) => {
+          ctx.font = `900 ${mainFontSize}px "Radio Canada", sans-serif`;
+
+          if (requiresExpansion) {
+            s.origW = s.standaloneW;
+            s.blockWidth = Math.max(s.origW, s.furiW, s.romW);
+            s.isPartOfContinuousWord = false;
+          } else {
+            accText += s.text || "";
+            let currentSubWidth = ctx.measureText(accText).width;
+            s.origW = Math.max(0, currentSubWidth - previousSubWidth);
+            previousSubWidth = currentSubWidth;
+
+            s.blockWidth = s.origW;
+            s.isPartOfContinuousWord = true;
+            if (index === 0) {
+              s.isContinuousWordStart = true;
+              s.continuousWordText = fullWordText;
+            }
+          }
+        });
+      });
+
+      words.forEach((word) => {
+        let wordTotalWidth = word.reduce((sum, s) => sum + s.blockWidth, 0);
+
+        if (currentX + wordTotalWidth > logicalWidth * 0.95 && row.length > 0) {
           currentX = 0;
           row = [];
           rows.push(row);
         }
 
-        s.layoutX = currentX;
-        currentX += s.blockWidth;
-        row.push(s);
+        word.forEach((s) => {
+          s.layoutX = currentX;
+          currentX += s.blockWidth;
+          row.push(s);
+        });
       });
 
       rows.forEach((r) => {
@@ -949,14 +1005,6 @@ class EncoreController {
         );
         renderTextToCtx(
           this.dimCtx,
-          s.text,
-          s.layoutY,
-          `900 ${mainFontSize}px "Radio Canada"`,
-          s.origW,
-          false,
-        );
-        renderTextToCtx(
-          this.dimCtx,
           s.romanized,
           s.layoutY + mainFontSize * 0.6,
           `700 ${subFontSize}px "Radio Canada"`,
@@ -974,20 +1022,49 @@ class EncoreController {
         );
         renderTextToCtx(
           this.mainCtx,
-          s.text,
-          s.layoutY,
-          `900 ${mainFontSize}px "Radio Canada"`,
-          s.origW,
-          true,
-        );
-        renderTextToCtx(
-          this.mainCtx,
           s.romanized,
           s.layoutY + mainFontSize * 0.6,
           `700 ${subFontSize}px "Radio Canada"`,
           s.romW,
           true,
         );
+
+        if (s.isPartOfContinuousWord) {
+          if (s.isContinuousWordStart && s.continuousWordText) {
+            const wordX = s.layoutX;
+
+            this.dimCtx.font = `900 ${mainFontSize}px "Radio Canada", sans-serif`;
+            this.dimCtx.fillStyle = colors.dim;
+            this.dimCtx.strokeStyle = colors.dimStroke;
+            this.dimCtx.lineWidth = mainFontSize * 0.15;
+            this.dimCtx.strokeText(s.continuousWordText, wordX, s.layoutY);
+            this.dimCtx.fillText(s.continuousWordText, wordX, s.layoutY);
+
+            this.mainCtx.font = `900 ${mainFontSize}px "Radio Canada", sans-serif`;
+            this.mainCtx.fillStyle = colors.main;
+            this.mainCtx.strokeStyle = colors.stroke;
+            this.mainCtx.lineWidth = mainFontSize * 0.15;
+            this.mainCtx.strokeText(s.continuousWordText, wordX, s.layoutY);
+            this.mainCtx.fillText(s.continuousWordText, wordX, s.layoutY);
+          }
+        } else {
+          renderTextToCtx(
+            this.dimCtx,
+            s.text || "",
+            s.layoutY,
+            `900 ${mainFontSize}px "Radio Canada", sans-serif`,
+            s.origW,
+            false,
+          );
+          renderTextToCtx(
+            this.mainCtx,
+            s.text || "",
+            s.layoutY,
+            `900 ${mainFontSize}px "Radio Canada", sans-serif`,
+            s.origW,
+            true,
+          );
+        }
       });
     });
   }
