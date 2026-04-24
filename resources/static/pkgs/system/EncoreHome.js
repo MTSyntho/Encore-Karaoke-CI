@@ -907,7 +907,7 @@ class EncoreController {
 
           const drawText = (text, y, font, w, isActiveDraw) => {
             if (!text) return;
-            ctx.font = font;
+            if (ctx.font !== font) ctx.font = font;
 
             ctx.fillStyle = colors.dim;
             ctx.strokeStyle = colors.dimStroke;
@@ -936,24 +936,21 @@ class EncoreController {
             }
           };
 
+          const subFontStr = `700 ${subFontSize}px "Radio Canada", sans-serif`;
+          const mainFontStr = `900 ${mainFontSize}px "Radio Canada", sans-serif`;
+
           drawText(
             s.furigana,
             s.layoutY - mainFontSize * 1.1,
-            `700 ${subFontSize}px "Radio Canada"`,
+            subFontStr,
             s.furiW,
             false,
           );
-          drawText(
-            s.text,
-            s.layoutY,
-            `900 ${mainFontSize}px "Radio Canada"`,
-            s.origW,
-            true,
-          );
+          drawText(s.text, s.layoutY, mainFontStr, s.origW, true);
           drawText(
             s.romanized,
             s.layoutY + mainFontSize * 0.6,
-            `700 ${subFontSize}px "Radio Canada"`,
+            subFontStr,
             s.romW,
             false,
           );
@@ -2518,19 +2515,32 @@ class EncoreController {
       this.currentMidiLine1 = this.midiLines[0] || [];
       this.currentMidiLine2 = this.midiLines[1] || [];
 
-      const resolveRomaji = async (syllable) => {
-        if (!syllable.romanized && !syllable.romanizationPromise) {
-          syllable.romanizationPromise = Romanizer.romanize(
-            syllable.furigana || syllable.text,
-          ).then((rt) => {
-            syllable.romanized = rt || "";
-            this.calculateLyricLayout();
-          });
+      this.resolveRomajiForLine = async (lineIndex) => {
+        if (!this.midiLines || lineIndex >= this.midiLines.length) return;
+        const line = this.midiLines[lineIndex];
+
+        for (const syllable of line) {
+          if (!syllable.romanized && !syllable.romanizationPromise) {
+            syllable.romanizationPromise = Romanizer.romanize(
+              syllable.furigana || syllable.text,
+            ).then((rt) => {
+              syllable.romanized = rt || "";
+            });
+            await syllable.romanizationPromise;
+          }
+        }
+
+        if (
+          lineIndex === this.currentSongLineIndex ||
+          lineIndex === this.currentSongLineIndex + 1
+        ) {
+          this.requestCanvasCacheUpdate = true;
         }
       };
 
-      this.currentMidiLine1.forEach(resolveRomaji);
-      this.currentMidiLine2.forEach(resolveRomaji);
+      this.resolveRomajiForLine(0);
+      this.resolveRomajiForLine(1);
+      this.resolveRomajiForLine(2);
 
       this.resizeLyricsCanvas();
       this.dom.lyricsCanvas.styleJs({ opacity: "1" });
@@ -2580,9 +2590,8 @@ class EncoreController {
               this.midiLines[this.currentSongLineIndex + 1] || [];
           }
 
-          this.currentMidiLine1.forEach(resolveRomaji);
-          this.currentMidiLine2.forEach(resolveRomaji);
           this.calculateLyricLayout();
+          this.resolveRomajiForLine(this.currentSongLineIndex + 2);
         }
 
         targetSyllable.wipeStartTime = performance.now();
