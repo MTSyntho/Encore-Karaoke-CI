@@ -166,11 +166,17 @@ class EncoreController {
     this.lastCountdownTick = null;
     this.parsedLrc = [];
 
-    this.dimCanvas = document.createElement("canvas");
-    this.dimCtx = this.dimCanvas.getContext("2d", { alpha: true });
-
-    this.mainCanvas = document.createElement("canvas");
-    this.mainCtx = this.mainCanvas.getContext("2d", { alpha: true });
+    this.lineCaches = [];
+    for (let i = 0; i < 2; i++) {
+      const dim = document.createElement("canvas");
+      const main = document.createElement("canvas");
+      this.lineCaches.push({
+        dim,
+        dimCtx: dim.getContext("2d", { alpha: true }),
+        main,
+        mainCtx: main.getContext("2d", { alpha: true }),
+      });
+    }
 
     this.requestCanvasCacheUpdate = false;
   }
@@ -953,30 +959,43 @@ class EncoreController {
     const logicalWidth =
       parseFloat(canvas.style.width) || window.innerWidth * 0.9;
 
-    if (this.dimCanvas.width !== width || this.dimCanvas.height !== height) {
-      this.dimCanvas.width = width;
-      this.dimCanvas.height = height;
-      this.mainCanvas.width = width;
-      this.mainCanvas.height = height;
-
-      this.dimCtx.setTransform(1, 0, 0, 1, 0, 0);
-      this.mainCtx.setTransform(1, 0, 0, 1, 0, 0);
-      this.dimCtx.scale(dpr, dpr);
-      this.mainCtx.scale(dpr, dpr);
-    } else {
-      this.dimCtx.clearRect(0, 0, width, height);
-      this.mainCtx.clearRect(0, 0, width, height);
+    while (this.lineCaches.length < this.renderableLines.length) {
+      const dim = document.createElement("canvas");
+      const main = document.createElement("canvas");
+      this.lineCaches.push({
+        dim,
+        dimCtx: dim.getContext("2d", { alpha: true }),
+        main,
+        mainCtx: main.getContext("2d", { alpha: true }),
+      });
     }
-
-    this.dimCtx.textBaseline = "alphabetic";
-    this.mainCtx.textBaseline = "alphabetic";
-    this.dimCtx.lineJoin = "round";
-    this.mainCtx.lineJoin = "round";
 
     const mainFontSize = Math.floor(logicalWidth * 0.045);
     const subFontSize = Math.floor(logicalWidth * 0.018);
 
-    this.renderableLines.forEach((line) => {
+    this.renderableLines.forEach((line, lineIdx) => {
+      const cache = this.lineCaches[lineIdx];
+
+      if (cache.dim.width !== width || cache.dim.height !== height) {
+        cache.dim.width = width;
+        cache.dim.height = height;
+        cache.main.width = width;
+        cache.main.height = height;
+
+        cache.dimCtx.setTransform(1, 0, 0, 1, 0, 0);
+        cache.mainCtx.setTransform(1, 0, 0, 1, 0, 0);
+        cache.dimCtx.scale(dpr, dpr);
+        cache.mainCtx.scale(dpr, dpr);
+      } else {
+        cache.dimCtx.clearRect(0, 0, width, height);
+        cache.mainCtx.clearRect(0, 0, width, height);
+      }
+
+      cache.dimCtx.textBaseline = "alphabetic";
+      cache.mainCtx.textBaseline = "alphabetic";
+      cache.dimCtx.lineJoin = "round";
+      cache.mainCtx.lineJoin = "round";
+
       line.syllables.forEach((s) => {
         if (s.isHidden) return;
         const centerX = s.layoutX + s.blockWidth / 2;
@@ -996,7 +1015,7 @@ class EncoreController {
         };
 
         renderTextToCtx(
-          this.dimCtx,
+          cache.dimCtx,
           s.furigana,
           s.layoutY - mainFontSize * 1.1,
           `700 ${subFontSize}px "Radio Canada"`,
@@ -1004,52 +1023,34 @@ class EncoreController {
           false,
         );
         renderTextToCtx(
-          this.dimCtx,
-          s.romanized,
-          s.layoutY + mainFontSize * 0.6,
-          `700 ${subFontSize}px "Radio Canada"`,
-          s.romW,
-          false,
-        );
-
-        renderTextToCtx(
-          this.mainCtx,
+          cache.mainCtx,
           s.furigana,
           s.layoutY - mainFontSize * 1.1,
           `700 ${subFontSize}px "Radio Canada"`,
           s.furiW,
-          true,
-        );
-        renderTextToCtx(
-          this.mainCtx,
-          s.romanized,
-          s.layoutY + mainFontSize * 0.6,
-          `700 ${subFontSize}px "Radio Canada"`,
-          s.romW,
           true,
         );
 
         if (s.isPartOfContinuousWord) {
           if (s.isContinuousWordStart && s.continuousWordText) {
             const wordX = s.layoutX;
+            cache.dimCtx.font = `900 ${mainFontSize}px "Radio Canada", sans-serif`;
+            cache.dimCtx.fillStyle = colors.dim;
+            cache.dimCtx.strokeStyle = colors.dimStroke;
+            cache.dimCtx.lineWidth = mainFontSize * 0.15;
+            cache.dimCtx.strokeText(s.continuousWordText, wordX, s.layoutY);
+            cache.dimCtx.fillText(s.continuousWordText, wordX, s.layoutY);
 
-            this.dimCtx.font = `900 ${mainFontSize}px "Radio Canada", sans-serif`;
-            this.dimCtx.fillStyle = colors.dim;
-            this.dimCtx.strokeStyle = colors.dimStroke;
-            this.dimCtx.lineWidth = mainFontSize * 0.15;
-            this.dimCtx.strokeText(s.continuousWordText, wordX, s.layoutY);
-            this.dimCtx.fillText(s.continuousWordText, wordX, s.layoutY);
-
-            this.mainCtx.font = `900 ${mainFontSize}px "Radio Canada", sans-serif`;
-            this.mainCtx.fillStyle = colors.main;
-            this.mainCtx.strokeStyle = colors.stroke;
-            this.mainCtx.lineWidth = mainFontSize * 0.15;
-            this.mainCtx.strokeText(s.continuousWordText, wordX, s.layoutY);
-            this.mainCtx.fillText(s.continuousWordText, wordX, s.layoutY);
+            cache.mainCtx.font = `900 ${mainFontSize}px "Radio Canada", sans-serif`;
+            cache.mainCtx.fillStyle = colors.main;
+            cache.mainCtx.strokeStyle = colors.stroke;
+            cache.mainCtx.lineWidth = mainFontSize * 0.15;
+            cache.mainCtx.strokeText(s.continuousWordText, wordX, s.layoutY);
+            cache.mainCtx.fillText(s.continuousWordText, wordX, s.layoutY);
           }
         } else {
           renderTextToCtx(
-            this.dimCtx,
+            cache.dimCtx,
             s.text || "",
             s.layoutY,
             `900 ${mainFontSize}px "Radio Canada", sans-serif`,
@@ -1057,7 +1058,7 @@ class EncoreController {
             false,
           );
           renderTextToCtx(
-            this.mainCtx,
+            cache.mainCtx,
             s.text || "",
             s.layoutY,
             `900 ${mainFontSize}px "Radio Canada", sans-serif`,
@@ -1065,6 +1066,23 @@ class EncoreController {
             true,
           );
         }
+
+        renderTextToCtx(
+          cache.dimCtx,
+          s.romanized,
+          s.layoutY + mainFontSize * 0.6,
+          `700 ${subFontSize}px "Radio Canada"`,
+          s.romW,
+          false,
+        );
+        renderTextToCtx(
+          cache.mainCtx,
+          s.romanized,
+          s.layoutY + mainFontSize * 0.6,
+          `700 ${subFontSize}px "Radio Canada"`,
+          s.romW,
+          true,
+        );
       });
     });
   }
@@ -1094,14 +1112,35 @@ class EncoreController {
         return;
       }
 
-      ctx.drawImage(this.dimCanvas, 0, 0, logicalWidth, logicalHeight);
-      ctx.save();
-      ctx.beginPath();
+      let fadeProgress = 1.0;
+      if (this.nextLineFadeStartMs && this.nextLineFadeDurationMs > 0) {
+        const elapsed = performance.now() - this.nextLineFadeStartMs;
+        fadeProgress = Math.min(1.0, elapsed / this.nextLineFadeDurationMs);
+      } else if (this.nextLineFadeDurationMs === 0) {
+        fadeProgress = 1.0;
+      }
+
+      this.renderableLines.forEach((line, lineIdx) => {
+        const cache = this.lineCaches[lineIdx];
+        if (!cache) return;
+
+        const isNext = line.isNextLine;
+        ctx.globalAlpha = isNext ? fadeProgress : 1.0;
+        ctx.drawImage(cache.dim, 0, 0, logicalWidth, logicalHeight);
+      });
+
+      ctx.globalAlpha = 1.0;
 
       const currentTime = this.currentMediaTime || 0;
 
-      this.renderableLines.forEach((line) => {
+      this.renderableLines.forEach((line, lineIdx) => {
         if (line.isNextLine) return;
+
+        const cache = this.lineCaches[lineIdx];
+        if (!cache) return;
+
+        ctx.save();
+        ctx.beginPath();
 
         line.syllables.forEach((s) => {
           if (s.isHidden) return;
@@ -1137,11 +1176,11 @@ class EncoreController {
             );
           }
         });
-      });
 
-      ctx.clip();
-      ctx.drawImage(this.mainCanvas, 0, 0, logicalWidth, logicalHeight);
-      ctx.restore();
+        ctx.clip();
+        ctx.drawImage(cache.main, 0, 0, logicalWidth, logicalHeight);
+        ctx.restore();
+      });
     } else if (this.parsedLrc && this.currentLrcLine1) {
       ctx.textAlign = "center";
       const cx = logicalWidth / 2;
@@ -2719,6 +2758,8 @@ class EncoreController {
       this.allMidiSyllables = allSyllables;
       this.lastCompletedSyllableIndex = -1;
       this.currentSongLineIndex = 0;
+      this.nextLineFadeStartMs = null;
+      this.nextLineFadeDurationMs = 0;
       this.midiLines = lines;
 
       this.currentMidiLine1 = this.midiLines[0] || [];
@@ -2792,6 +2833,7 @@ class EncoreController {
 
         if (targetSyllable.lineIndex !== this.currentSongLineIndex) {
           this.currentSongLineIndex = targetSyllable.lineIndex;
+          this.triggerLineFade();
 
           if (this.currentSongLineIndex % 2 === 0) {
             this.currentMidiLine1 =
@@ -2859,6 +2901,30 @@ class EncoreController {
           }
         }
       }
+    }
+  }
+
+  /**
+   * Calculates the timing for the upcoming line and triggers a fade animation if the song pacing allows it.
+   * Yes the design is very TJ Media Supremo
+   */
+  triggerLineFade() {
+    this.nextLineFadeStartMs = performance.now();
+    const nextLineIdx = this.currentSongLineIndex + 1;
+    const nextLine = this.midiLines ? this.midiLines[nextLineIdx] : null;
+
+    if (nextLine && nextLine.length > 0) {
+      const nextLineStartTime = nextLine[0].absoluteTime;
+      const currentTime = this.currentMediaTime || 0;
+      const timeUntilNext = nextLineStartTime - currentTime;
+
+      if (timeUntilNext < 1.2) {
+        this.nextLineFadeDurationMs = 0;
+      } else {
+        this.nextLineFadeDurationMs = 500;
+      }
+    } else {
+      this.nextLineFadeDurationMs = 0;
     }
   }
 
@@ -2939,6 +3005,7 @@ class EncoreController {
 
         if (this.currentSongLineIndex !== newLineIndex) {
           this.currentSongLineIndex = newLineIndex;
+          this.triggerLineFade();
 
           if (this.currentSongLineIndex % 2 === 0) {
             this.currentMidiLine1 =
