@@ -226,6 +226,9 @@ let guideAnalyserBuffer = null;
 let saveVolumesTimeout = null;
 let micAnalyserBuffer = null;
 
+let lastScoreTime = 0;
+let lastPianoRollTime = 0;
+
 const state = {
   scoring: {
     enabled: false,
@@ -612,11 +615,22 @@ function timingLoop() {
     pianoRollContainer &&
     pianoRollContainer.elm.classList.contains("visible")
   ) {
-    drawPianoRoll(currentTime);
+    if (now - lastPianoRollTime > 33) {
+      drawPianoRoll(currentTime);
+      lastPianoRollTime = now;
+    }
   }
 
   if (state.scoring.enabled) {
-    updateScore(currentTime);
+    if (now - lastScoreTime > 33) {
+      updateScore(currentTime);
+      document.dispatchEvent(
+        new CustomEvent("CherryTree.Forte.Scoring.Update", {
+          detail: pkg.data.getScoringState(),
+        }),
+      );
+      lastScoreTime = now;
+    }
   }
 
   document.dispatchEvent(
