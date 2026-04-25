@@ -987,8 +987,15 @@ class EncoreController {
         cache.dimCtx.scale(dpr, dpr);
         cache.mainCtx.scale(dpr, dpr);
       } else {
+        cache.dimCtx.save();
+        cache.dimCtx.setTransform(1, 0, 0, 1, 0, 0);
         cache.dimCtx.clearRect(0, 0, width, height);
+        cache.dimCtx.restore();
+
+        cache.mainCtx.save();
+        cache.mainCtx.setTransform(1, 0, 0, 1, 0, 0);
         cache.mainCtx.clearRect(0, 0, width, height);
+        cache.mainCtx.restore();
       }
 
       cache.dimCtx.textBaseline = "alphabetic";
@@ -1104,7 +1111,10 @@ class EncoreController {
       this.requestCanvasCacheUpdate = false;
     }
 
-    ctx.clearRect(0, 0, logicalWidth, logicalHeight);
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.restore();
 
     if (this.state.currentSongIsMIDI) {
       if (!this.renderableLines) {
@@ -2314,13 +2324,17 @@ class EncoreController {
     this.lastCountdownTick = null;
 
     if (this.lyricsRafId) cancelAnimationFrame(this.lyricsRafId);
-    if (this.lyricsCtx)
+    if (this.lyricsCtx) {
+      this.lyricsCtx.save();
+      this.lyricsCtx.setTransform(1, 0, 0, 1, 0, 0);
       this.lyricsCtx.clearRect(
         0,
         0,
         this.dom.lyricsCanvas.elm.width,
         this.dom.lyricsCanvas.elm.height,
       );
+      this.lyricsCtx.restore();
+    }
     this.renderableLines = [];
     this.currentMidiLine1 = [];
     this.currentMidiLine2 = [];
