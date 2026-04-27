@@ -3134,6 +3134,12 @@ p + .flex-list button {
   pointer-events: none;
 }
 
+.post-song-score-screen.visible {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: all;
+}
+
 .score-card {
   background: linear-gradient(
     145deg,
@@ -3283,19 +3289,9 @@ p + .flex-list button {
   z-index: 1000;
   opacity: 0;
   pointer-events: none;
-  visibility: hidden;
-  transition:
-    opacity 0.4s ease,
-    visibility 0.4s;
+  transition: opacity 0.4s ease;
   font-family: "Radio Canada", sans-serif;
   color: white;
-}
-
-.post-song-score-screen.visible,
-.post-song-screen-overlay.visible {
-  opacity: 1;
-  visibility: visible;
-  pointer-events: all;
 }
 
 .score-title-text {
