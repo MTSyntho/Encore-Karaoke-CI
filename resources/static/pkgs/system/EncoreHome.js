@@ -2037,14 +2037,21 @@ class EncoreController {
           const itemBottom = itemTop + this.ITEM_HEIGHT;
           const container = this.dom.songListContainer.elm;
 
+          const innerOffset = this.dom.listInner.elm.offsetTop;
+          const actualItemTop = itemTop + innerOffset;
+          const actualItemBottom = itemBottom + innerOffset;
+
           const viewTop = container.scrollTop;
           const viewBottom = viewTop + container.clientHeight;
-          const headerHeight = 35;
 
-          if (itemTop < viewTop + headerHeight) {
-            container.scrollTop = itemTop - headerHeight;
-          } else if (itemBottom > viewBottom) {
-            container.scrollTop = itemBottom - container.clientHeight;
+          const headerSafeZone = 40;
+          const bottomPadding = 24;
+
+          if (actualItemTop < viewTop + headerSafeZone) {
+            container.scrollTop = actualItemTop - headerSafeZone;
+          } else if (actualItemBottom > viewBottom - bottomPadding) {
+            container.scrollTop =
+              actualItemBottom - container.clientHeight + bottomPadding;
           }
         }
 
