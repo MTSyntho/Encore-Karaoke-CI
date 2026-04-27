@@ -2729,7 +2729,7 @@ p + .flex-list button {
    ========================================================================== */
 .intro-card {
   position: absolute;
-  top: 25%; /* Upper third placement */
+  top: 25%;
   left: 0;
   width: 100%;
   padding: 3rem 10%;
@@ -2754,14 +2754,12 @@ p + .flex-list button {
     opacity 0.4s ease-out,
     transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.1);
   pointer-events: none;
-  visibility: hidden;
   display: flex;
   justify-content: center;
 }
 
 .intro-card.visible {
   opacity: 1;
-  visibility: visible;
   transform: scaleY(1);
 }
 
