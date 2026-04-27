@@ -1,6 +1,7 @@
 import Html from "/libs/html.js";
 
 let wrapper;
+let renderLoopId;
 
 const pkg = {
   name: "Boot Manager",
@@ -16,8 +17,8 @@ const pkg = {
       sessionStorage.getItem("encore_boot_setup") === "true";
     sessionStorage.removeItem("encore_boot_setup");
 
-    let columns = Math.floor(document.body.clientWidth / 50);
-    let rows = Math.floor(document.body.clientHeight / 50);
+    let columns = Math.floor(window.innerWidth / 50);
+    let rows = Math.floor(window.innerHeight / 50);
 
     const config = await window.config.getAll();
     console.log("[BootManager] config", config);
@@ -31,8 +32,8 @@ const pkg = {
         display: "flex",
         justifyContent: "center",
         alignItems: "center",
-        top: 0,
-        left: 0,
+        top: "0",
+        left: "0",
         opacity: 1,
         backgroundColor: "#080810",
       })
@@ -46,17 +47,51 @@ const pkg = {
     };
     window.addEventListener("keydown", f2BootListener);
 
-    let tiles = new Html("div").classOn("tiles").appendTo(wrapper);
-    const createTile = (index) => new Html("div").classOn("tile");
-    const createTiles = (quantity) => {
-      Array.from(Array(quantity)).map((tile, index) => {
-        createTile(index).appendTo(tiles);
-      });
-    };
+    const tilesCanvas = new Html("canvas")
+      .styleJs({
+        position: "absolute",
+        top: "0",
+        left: "0",
+        width: "100%",
+        height: "100%",
+        pointerEvents: "none",
+        zIndex: 0,
+      })
+      .appendTo(wrapper);
 
-    tiles.elm.style.setProperty("--columns", columns);
-    tiles.elm.style.setProperty("--rows", rows);
-    createTiles(columns * rows);
+    const ctx = tilesCanvas.elm.getContext("2d");
+    const dpr = window.devicePixelRatio || 1;
+    tilesCanvas.elm.width = window.innerWidth * dpr;
+    tilesCanvas.elm.height = window.innerHeight * dpr;
+    ctx.scale(dpr, dpr);
+
+    const drawTileW = window.innerWidth / columns;
+    const drawTileH = window.innerHeight / rows;
+
+    let canvasTiles = [];
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < columns; c++) {
+        canvasTiles.push({ c, r, opacity: 1 });
+      }
+    }
+
+    const renderLoop = () => {
+      ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+      for (let i = 0; i < canvasTiles.length; i++) {
+        let tile = canvasTiles[i];
+        if (tile.opacity > 0) {
+          ctx.fillStyle = `rgba(0, 0, 0, ${tile.opacity})`;
+          ctx.fillRect(
+            tile.c * drawTileW,
+            tile.r * drawTileH,
+            drawTileW + 0.5,
+            drawTileH + 0.5,
+          );
+        }
+      }
+      renderLoopId = requestAnimationFrame(renderLoop);
+    };
+    renderLoopId = requestAnimationFrame(renderLoop);
 
     let terebiText = "テレビ";
     if (Math.floor(Math.random() * 100) == 7) {
@@ -74,6 +109,8 @@ const pkg = {
         color: "white",
         display: "flex",
         opacity: 0,
+        position: "relative",
+        zIndex: 10,
       })
       .html(
         terebiText
@@ -100,6 +137,7 @@ const pkg = {
         fontFamily: "Rajdhani, sans-serif",
         textAlign: "center",
         opacity: 0,
+        zIndex: 10,
       })
       .text("Press F2 to go into Setup")
       .appendTo(wrapper);
@@ -107,8 +145,8 @@ const pkg = {
     const warningScreen = new Html("div")
       .styleJs({
         position: "absolute",
-        top: 0,
-        left: 0,
+        top: "0",
+        left: "0",
         width: "100%",
         height: "100%",
         backgroundColor: "#080810",
@@ -220,8 +258,8 @@ const pkg = {
       });
 
       tl.add({
-        targets: ".tile",
-        opacity: [1, 0],
+        targets: canvasTiles,
+        opacity: 0,
         delay: anime.stagger(35, {
           grid: [columns, rows],
           from: "center",
@@ -231,8 +269,6 @@ const pkg = {
         duration: 100,
         ease: "outExpo",
         begin: () => {
-          // Switch the background to white ONLY precisely when the tiles start fading!
-          // This prevents the white background from bleeding through sub-pixel grid gaps.
           wrapper.styleJs({ backgroundColor: "white" });
           document.body.style.backgroundColor = "white";
         },
@@ -287,7 +323,7 @@ const pkg = {
     }
   },
   end: async function () {
-    // Good practice to clean up global changes
+    cancelAnimationFrame(renderLoopId);
     document.body.style.backgroundColor = "";
     if (wrapper) {
       wrapper.cleanup();
