@@ -615,7 +615,13 @@ class EncoreController {
       .appendTo(this.dom.songListContainer);
 
     this.visibleItemsMap = new Map();
-    this.dom.songListContainer.on("scroll", () => this.renderVirtualList());
+    this.dom.songListContainer.on("scroll", () => {
+      if (this._scrollRafId) return; // If already queued, ignore
+      this._scrollRafId = requestAnimationFrame(() => {
+        this._scrollRafId = null;
+        this.renderVirtualList();
+      });
+    });
 
     this.dom.bottomActions = new Html("div")
       .classOn("bottom-actions")
@@ -1921,125 +1927,135 @@ class EncoreController {
    * Updates standard menu interfaces including list selection highlighting and the active title.
    */
   updateMenuUI(preventScroll = false) {
-    const isIdling =
-      !this.state.showSongList &&
-      !this.state.isTypingNumber &&
-      this.state.mode === "menu" &&
-      !this.state.isPromptingSetup;
+    this._pendingPreventScroll = preventScroll;
 
-    if (isIdling) {
-      if (this.idleState === "newsong") {
-        this.dom.standbyScreen.classOn("hidden");
-        this.dom.newSongScreen.classOff("hidden");
-        this.dom.newSongScreen.styleJs({ opacity: 1 });
-      } else if (this.idleState === "bumper") {
-        this.dom.newSongScreen.classOn("hidden");
-        this.dom.standbyScreen.classOff("hidden");
-        this.dom.standbyBumper.styleJs({ opacity: 1 });
-      } else {
-        this.dom.newSongScreen.classOn("hidden");
-        this.dom.standbyScreen.classOff("hidden");
-        this.dom.standbyBumper.classOn("hidden");
-        this.dom.standbyText.classOff("hidden");
+    if (this._menuUpdateRafId) return;
+
+    this._menuUpdateRafId = requestAnimationFrame(() => {
+      this._menuUpdateRafId = null;
+
+      const currentPreventScroll = this._pendingPreventScroll;
+
+      const isIdling =
+        !this.state.showSongList &&
+        !this.state.isTypingNumber &&
+        this.state.mode === "menu" &&
+        !this.state.isPromptingSetup;
+
+      if (isIdling) {
+        if (this.idleState === "newsong") {
+          this.dom.standbyScreen.classOn("hidden");
+          this.dom.newSongScreen.classOff("hidden");
+          this.dom.newSongScreen.styleJs({ opacity: 1 });
+        } else if (this.idleState === "bumper") {
+          this.dom.newSongScreen.classOn("hidden");
+          this.dom.standbyScreen.classOff("hidden");
+          this.dom.standbyBumper.styleJs({ opacity: 1 });
+        } else {
+          this.dom.newSongScreen.classOn("hidden");
+          this.dom.standbyScreen.classOff("hidden");
+          this.dom.standbyBumper.classOn("hidden");
+          this.dom.standbyText.classOff("hidden");
+        }
+
+        this.dom.mainContent.classOn("hidden");
+        this.dom.songListContainer.classOn("hidden");
+        this.dom.bottomActions.classOn("hidden");
+        this.dom.numberDisplay.text("");
+        this.dom.songTitle.text("");
+        this.dom.songArtist.text("");
+        return;
       }
 
-      this.dom.mainContent.classOn("hidden");
-      this.dom.songListContainer.classOn("hidden");
-      this.dom.bottomActions.classOn("hidden");
-      this.dom.numberDisplay.text("");
-      this.dom.songTitle.text("");
-      this.dom.songArtist.text("");
-      return;
-    }
+      this.dom.standbyScreen.classOn("hidden");
+      this.dom.newSongScreen.classOn("hidden");
+      this.dom.standbyBumper.styleJs({ opacity: 0 });
+      this.dom.newSongScreen.styleJs({ opacity: 0 });
 
-    this.dom.standbyScreen.classOn("hidden");
-    this.dom.newSongScreen.classOn("hidden");
-    this.dom.standbyBumper.styleJs({ opacity: 0 });
-    this.dom.newSongScreen.styleJs({ opacity: 0 });
+      this.dom.mainContent.classOff("hidden");
+      this.dom.songListContainer.classOff("hidden");
+      this.dom.bottomActions.classOff("hidden");
+      this.wrapper[this.state.isTypingNumber ? "classOn" : "classOff"](
+        "is-typing",
+      );
 
-    this.dom.mainContent.classOff("hidden");
-    this.dom.songListContainer.classOff("hidden");
-    this.dom.bottomActions.classOff("hidden");
-    this.wrapper[this.state.isTypingNumber ? "classOn" : "classOff"](
-      "is-typing",
-    );
+      const code = this.state.songNumber.padStart(5, "0");
+      let activeSong =
+        this.state.songNumber.length > 0
+          ? this.songMap.get(code)
+          : this.state.highlightedIndex >= 0
+            ? this.songList[this.state.highlightedIndex]
+            : null;
 
-    const code = this.state.songNumber.padStart(5, "0");
-    let activeSong =
-      this.state.songNumber.length > 0
-        ? this.songMap.get(code)
-        : this.state.highlightedIndex >= 0
-          ? this.songList[this.state.highlightedIndex]
-          : null;
+      this.dom.numberDisplay.text(
+        this.state.songNumber.length > 0
+          ? code
+          : activeSong
+            ? activeSong.code
+            : "",
+      );
+      this.dom.numberDisplay[activeSong ? "classOn" : "classOff"]("active");
 
-    this.dom.numberDisplay.text(
-      this.state.songNumber.length > 0
-        ? code
-        : activeSong
-          ? activeSong.code
-          : "",
-    );
-    this.dom.numberDisplay[activeSong ? "classOn" : "classOff"]("active");
+      this.dom.songTitle.clear();
 
-    this.dom.songTitle.clear();
+      if (activeSong) {
+        const fmt = this.getFormatInfo(activeSong);
 
-    if (activeSong) {
-      const fmt = this.getFormatInfo(activeSong);
+        new Html("span")
+          .classOn("format-badge")
+          .text(fmt.label)
+          .styleJs({
+            backgroundColor: fmt.color,
+            fontSize: "0.5em",
+            fontFamily: "Rajdhani",
+            verticalAlign: "middle",
+            marginRight: "1rem",
+            transform: "translateY(-0.1rem)",
+            display: "inline-block",
+            paddingLeft: "0.5em",
+            paddingRight: "0.5em",
+          })
+          .appendTo(this.dom.songTitle);
 
-      new Html("span")
-        .classOn("format-badge")
-        .text(fmt.label)
-        .styleJs({
-          backgroundColor: fmt.color,
-          fontSize: "0.5em",
-          fontFamily: "Rajdhani",
-          verticalAlign: "middle",
-          marginRight: "1rem",
-          transform: "translateY(-0.1rem)",
-          display: "inline-block",
-          paddingLeft: "0.5em",
-          paddingRight: "0.5em",
-        })
-        .appendTo(this.dom.songTitle);
+        new Html("span")
+          .text(activeSong.title)
+          .styleJs({ verticalAlign: "middle" })
+          .appendTo(this.dom.songTitle);
+      } else if (this.state.songNumber.length === 5) {
+        this.dom.songTitle.text("Song Not Found");
+      }
 
-      new Html("span")
-        .text(activeSong.title)
-        .styleJs({ verticalAlign: "middle" })
-        .appendTo(this.dom.songTitle);
-    } else if (this.state.songNumber.length === 5) {
-      this.dom.songTitle.text("Song Not Found");
-    }
+      this.dom.songArtist.text(activeSong ? activeSong.artist : "");
 
-    this.dom.songArtist.text(activeSong ? activeSong.artist : "");
+      if (this.state.showSongList) {
+        if (
+          !currentPreventScroll &&
+          !this.state.isTypingNumber &&
+          this.state.highlightedIndex >= 0
+        ) {
+          const itemTop = this.state.highlightedIndex * this.ITEM_HEIGHT;
+          const itemBottom = itemTop + this.ITEM_HEIGHT;
+          const container = this.dom.songListContainer.elm;
 
-    if (this.state.showSongList) {
-      if (
-        !preventScroll &&
-        !this.state.isTypingNumber &&
-        this.state.highlightedIndex >= 0
-      ) {
-        const itemTop = this.state.highlightedIndex * this.ITEM_HEIGHT;
-        const itemBottom = itemTop + this.ITEM_HEIGHT;
-        const container = this.dom.songListContainer.elm;
+          const viewTop = container.scrollTop;
+          const viewBottom = viewTop + container.clientHeight;
+          const headerHeight = 35;
 
-        const viewTop = container.scrollTop;
-        const viewBottom = viewTop + container.clientHeight;
-        const headerHeight = 35;
+          if (itemTop < viewTop + headerHeight) {
+            container.scrollTop = itemTop - headerHeight;
+          } else if (itemBottom > viewBottom) {
+            container.scrollTop = itemBottom - container.clientHeight;
+          }
+        }
 
-        if (itemTop < viewTop + headerHeight) {
-          container.scrollTop = itemTop - headerHeight;
-        } else if (itemBottom > viewBottom) {
-          container.scrollTop = itemBottom - container.clientHeight;
+        this.renderVirtualList();
+        for (const [idx, item] of this.visibleItemsMap.entries()) {
+          item[idx === this.state.highlightedIndex ? "classOn" : "classOff"](
+            "highlighted",
+          );
         }
       }
-
-      this.renderVirtualList();
-      for (const [idx, item] of this.visibleItemsMap.entries()) {
-        item[idx === this.state.highlightedIndex ? "classOn" : "classOff"](
-          "highlighted",
-        );
-      }
-    }
+    });
   }
 
   /**
