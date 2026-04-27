@@ -121,6 +121,8 @@ class EncoreController {
       this.state.isScoreNarrationEnabled,
     );
 
+    this.state.previousHighlightedIndex = -1;
+
     this.bumperImages = [];
     this.currentBumperIndex = 0;
     this.bumperInterval = null;
@@ -1952,14 +1954,28 @@ class EncoreController {
 
     this.dom.songArtist.text(activeSong ? activeSong.artist : "");
 
-    this.songItemElements.forEach((item, index) => {
-      const isHi = index === this.state.highlightedIndex;
-      item[isHi ? "classOn" : "classOff"]("highlighted");
-      if (isHi && !this.state.isTypingNumber) {
-        if (index === 0) this.dom.songListContainer.elm.scrollTop = 0;
-        else item.elm.scrollIntoView({ block: "nearest" });
+    if (this.songItemElements.length > 0) {
+      const prevIdx = this.state.previousHighlightedIndex;
+      if (prevIdx >= 0 && prevIdx < this.songItemElements.length) {
+        this.songItemElements[prevIdx].classOff("highlighted");
       }
-    });
+
+      const currIdx = this.state.highlightedIndex;
+      if (currIdx >= 0 && currIdx < this.songItemElements.length) {
+        const currentItem = this.songItemElements[currIdx];
+        currentItem.classOn("highlighted");
+
+        if (!this.state.isTypingNumber) {
+          if (currIdx === 0) {
+            this.dom.songListContainer.elm.scrollTop = 0;
+          } else {
+            currentItem.elm.scrollIntoView({ block: "nearest" });
+          }
+        }
+      }
+
+      this.state.previousHighlightedIndex = currIdx;
+    }
   }
 
   /**
