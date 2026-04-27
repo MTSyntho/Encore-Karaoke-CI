@@ -802,8 +802,10 @@ class EncoreController {
         item.on("click", () => this.startPlayer(song));
         item.on("mouseover", () => {
           if (this.state.mode === "menu" && !this.state.isTypingNumber) {
-            this.state.highlightedIndex = i;
-            this.updateMenuUI();
+            if (this.state.highlightedIndex !== i) {
+              this.state.highlightedIndex = i;
+              this.updateMenuUI(true);
+            }
           }
         });
 
@@ -1918,7 +1920,7 @@ class EncoreController {
   /**
    * Updates standard menu interfaces including list selection highlighting and the active title.
    */
-  updateMenuUI() {
+  updateMenuUI(preventScroll = false) {
     const isIdling =
       !this.state.showSongList &&
       !this.state.isTypingNumber &&
@@ -2011,7 +2013,11 @@ class EncoreController {
     this.dom.songArtist.text(activeSong ? activeSong.artist : "");
 
     if (this.state.showSongList) {
-      if (!this.state.isTypingNumber && this.state.highlightedIndex >= 0) {
+      if (
+        !preventScroll &&
+        !this.state.isTypingNumber &&
+        this.state.highlightedIndex >= 0
+      ) {
         const itemTop = this.state.highlightedIndex * this.ITEM_HEIGHT;
         const itemBottom = itemTop + this.ITEM_HEIGHT;
         const container = this.dom.songListContainer.elm;
