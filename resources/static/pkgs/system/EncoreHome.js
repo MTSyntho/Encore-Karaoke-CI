@@ -586,9 +586,11 @@ class EncoreController {
     this.dom.songListContainer = new Html("div")
       .classOn("song-list-container")
       .appendTo(this.dom.overlay);
+
     const listHeader = new Html("div")
       .classOn("song-list-header")
       .appendTo(this.dom.songListContainer);
+
     ["CODE", "TITLE", "ARTIST"].forEach((t, i) =>
       new Html("div")
         .classOn(
@@ -602,38 +604,18 @@ class EncoreController {
         .appendTo(listHeader),
     );
 
-    this.songItemElements = [];
-    const listFragment = document.createDocumentFragment();
+    this.ITEM_HEIGHT = 44;
 
-    this.songList.forEach((song, index) => {
-      const item = new Html("div").classOn("song-item");
-      new Html("div").classOn("song-item-code").text(song.code).appendTo(item);
-      const fmt = this.getFormatInfo(song);
-      const titleContainer = new Html("div")
-        .classOn("song-item-title")
-        .appendTo(item);
-      new Html("span")
-        .classOn("format-badge")
-        .text(fmt.label)
-        .styleJs({ backgroundColor: fmt.color })
-        .appendTo(titleContainer);
-      new Html("span").text(song.title).appendTo(titleContainer);
-      new Html("div")
-        .classOn("song-item-artist")
-        .text(song.artist)
-        .appendTo(item);
-      item.on("click", () => this.startPlayer(song));
-      item.on("mouseover", () => {
-        if (this.state.mode === "menu" && !this.state.isTypingNumber) {
-          this.state.highlightedIndex = index;
-          this.updateMenuUI();
-        }
-      });
-      this.songItemElements.push(item);
-      listFragment.appendChild(item.elm);
-    });
+    this.dom.listInner = new Html("div")
+      .styleJs({
+        position: "relative",
+        height: `${this.songList.length * this.ITEM_HEIGHT}px`,
+        width: "100%",
+      })
+      .appendTo(this.dom.songListContainer);
 
-    this.dom.songListContainer.elm.appendChild(listFragment);
+    this.visibleItemsMap = new Map();
+    this.dom.songListContainer.on("scroll", () => this.renderVirtualList());
 
     this.dom.bottomActions = new Html("div")
       .classOn("bottom-actions")
@@ -757,6 +739,77 @@ class EncoreController {
     window.addEventListener("resize", this.resizeLyricsCanvas);
 
     this.buildRecordingsUI();
+  }
+
+  renderVirtualList() {
+    if (this.state.mode !== "menu" || !this.state.showSongList) return;
+
+    const scrollTop = this.dom.songListContainer.elm.scrollTop;
+    const viewportHeight = this.dom.songListContainer.elm.clientHeight;
+
+    const startIndex = Math.max(
+      0,
+      Math.floor(scrollTop / this.ITEM_HEIGHT) - 5,
+    );
+    const endIndex = Math.min(
+      this.songList.length - 1,
+      Math.ceil((scrollTop + viewportHeight) / this.ITEM_HEIGHT) + 5,
+    );
+
+    for (const [index, itemEl] of this.visibleItemsMap.entries()) {
+      if (index < startIndex || index > endIndex) {
+        itemEl.cleanup();
+        this.visibleItemsMap.delete(index);
+      }
+    }
+
+    for (let i = startIndex; i <= endIndex; i++) {
+      if (!this.visibleItemsMap.has(i)) {
+        const song = this.songList[i];
+        const item = new Html("div").classOn("song-item").styleJs({
+          position: "absolute",
+          top: `${i * this.ITEM_HEIGHT}px`,
+          left: "0",
+          right: "0",
+          height: `${this.ITEM_HEIGHT}px`,
+        });
+
+        new Html("div")
+          .classOn("song-item-code")
+          .text(song.code)
+          .appendTo(item);
+
+        const fmt = this.getFormatInfo(song);
+        const titleContainer = new Html("div")
+          .classOn("song-item-title")
+          .appendTo(item);
+
+        new Html("span")
+          .classOn("format-badge")
+          .text(fmt.label)
+          .styleJs({ backgroundColor: fmt.color })
+          .appendTo(titleContainer);
+        new Html("span").text(song.title).appendTo(titleContainer);
+
+        new Html("div")
+          .classOn("song-item-artist")
+          .text(song.artist)
+          .appendTo(item);
+
+        item.on("click", () => this.startPlayer(song));
+        item.on("mouseover", () => {
+          if (this.state.mode === "menu" && !this.state.isTypingNumber) {
+            this.state.highlightedIndex = i;
+            this.updateMenuUI();
+          }
+        });
+
+        if (i === this.state.highlightedIndex) item.classOn("highlighted");
+
+        item.appendTo(this.dom.listInner);
+        this.visibleItemsMap.set(i, item);
+      }
+    }
   }
 
   getDuetColors(role) {
@@ -1954,27 +2007,29 @@ class EncoreController {
 
     this.dom.songArtist.text(activeSong ? activeSong.artist : "");
 
-    if (this.songItemElements.length > 0) {
-      const prevIdx = this.state.previousHighlightedIndex;
-      if (prevIdx >= 0 && prevIdx < this.songItemElements.length) {
-        this.songItemElements[prevIdx].classOff("highlighted");
-      }
+    if (this.state.showSongList) {
+      this.renderVirtualList();
 
-      const currIdx = this.state.highlightedIndex;
-      if (currIdx >= 0 && currIdx < this.songItemElements.length) {
-        const currentItem = this.songItemElements[currIdx];
-        currentItem.classOn("highlighted");
+      if (!this.state.isTypingNumber && this.state.highlightedIndex >= 0) {
+        const itemTop = this.state.highlightedIndex * this.ITEM_HEIGHT;
+        const itemBottom = itemTop + this.ITEM_HEIGHT;
+        const container = this.dom.songListContainer.elm;
+        const viewTop = container.scrollTop;
+        const viewBottom = viewTop + container.clientHeight;
+        const headerHeight = 35;
 
-        if (!this.state.isTypingNumber) {
-          if (currIdx === 0) {
-            this.dom.songListContainer.elm.scrollTop = 0;
-          } else {
-            currentItem.elm.scrollIntoView({ block: "nearest" });
-          }
+        if (itemTop < viewTop + headerHeight) {
+          container.scrollTop = itemTop - headerHeight;
+        } else if (itemBottom > viewBottom) {
+          container.scrollTop = itemBottom - container.clientHeight;
+        }
+
+        for (const [idx, item] of this.visibleItemsMap.entries()) {
+          item[idx === this.state.highlightedIndex ? "classOn" : "classOff"](
+            "highlighted",
+          );
         }
       }
-
-      this.state.previousHighlightedIndex = currIdx;
     }
   }
 
