@@ -789,7 +789,10 @@ class EncoreController {
           .text(fmt.label)
           .styleJs({ backgroundColor: fmt.color })
           .appendTo(titleContainer);
-        new Html("span").text(song.title).appendTo(titleContainer);
+        new Html("span")
+          .text(song.title)
+          .classOn("song-title-text")
+          .appendTo(titleContainer);
 
         new Html("div")
           .classOn("song-item-artist")

@@ -2352,12 +2352,23 @@ p + .flex-list button {
   flex-grow: 1;
   display: flex;
   align-items: center;
+  min-width: 0; /* Critical for flex children to truncate */
+}
+
+.song-title-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .song-item-artist {
   width: 30%;
   text-align: right;
   opacity: 0.7;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-shrink: 0; /* Prevents artist column from shrinking too much */
 }
 
 /* --- Song List Header Styles --- */
