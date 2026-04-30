@@ -1,0 +1,39 @@
+name: Build Binaries
+
+on:
+    workflow_dispatch:
+
+jobs:
+    build:
+        runs-on: ubuntu-latest
+        environment: secrets 
+        container:
+            image: archlinux:latest
+            options: --privileged
+        steps:
+            - uses: actions/checkout@v2
+            - name: Prepare keyring
+              run: |
+                  pacman-key --init
+                  pacman --noconfirm -Sy archlinux-keyring
+            
+            - name: Install build dependencies
+              run: |
+                  rm /etc/pacman.conf
+                  cp pacman.conf /etc/pacman.conf
+                  pacman --noconfirm -Syyu
+                  pacman --noconfirm -S git nodejs npm dpkg fakeroot
+            
+            - name: Install node dependencies
+              run: |
+                  npm i
+
+            - name: Build binaries
+              run: |
+                  npm run make
+
+            - name: Upload Build artifacts ( Linux Debian )
+              uses: actions/upload-artifact@v4.6.2
+              with:
+                name: encore-linux-debian
+                path: ./out/make/deb/x64/*.deb
